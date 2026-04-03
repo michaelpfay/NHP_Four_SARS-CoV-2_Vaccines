@@ -1,0 +1,538 @@
+---
+title: "CoP SAP 6.8"
+author: "Allyson Mateja"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+library(kableExtra)
+library(ggplot2)
+library(RColorBrewer)
+library(boot)
+library(dplyr)
+library(readxl)
+library(saws)
+library(splines)
+library(segmented)
+library(drc)
+library(investr)
+```
+
+```{r, echo = FALSE}
+D <- as.data.frame(readxl::read_xlsx("H:/Projects/Mike Fay/NHP/Final Data/allDat.xlsx"))
+D$manuf <- factor(D$`Vaccine Candidate`, levels = c("Janssen Single Dose", "Janssen Two Dose", "Moderna", "Novavax", "Sanofi", "Placebo"), labels = c("Janssen", "Janssen", "Moderna", "Novavax", "Sanofi", "Placebo"))
+D$`Challenge Day` <- factor(D$`Challenge Day`)
+```
+
+
+
+\setcounter{table}{0}
+\renewcommand{\thetable}{6.8.\arabic{table}}
+
+
+```{r, echo = FALSE}
+cv_outcomes <- readxl::read_xlsx("C:/Users/matejaam/Desktop/cv_outcomes.xlsx")
+cv_outcomes_bin <- readxl::read_xlsx("C:/Users/matejaam/Desktop/cv_outcomes_bin.xlsx")
+```
+
+
+
+# 6.8 Cross Validation Prediction Using Vaccine Product
+
+To explore the robustness of the prediction, a cross validation analysis using the 4 vaccine products will be explored. Specifically, a prediction model for viral load will be created using a virus-specific antibody based on data from all but one of the vaccine products (e.g., the final selected model in Section 6.4.1; for binary viral loads as in 6.4.2 logistic models are used).  Then that model will be used to predict viral load in animals that got the vaccine product that was not used to build the model.  We will use agreement measures to predict how well the modeled viral loads predict the observed viral load (in the animals that got the vaccine product left out of the prediction model).  We will use the RMAC (random marginal agreement coefficient) versions of the concordance correlation coefficient for numeric viral load or the RMAC Cohen’s Kappa coefficient for binary viral load.  RMAC are the same as the usual agreement coefficients when the distribution of the predicted viral loads equal the distribution of the observed viral loads, but when those distributions differ the RMAC are slightly better because they do not imply greater agreement when those distributions disagree more (Fay, 2005).  This cross validation prediction will be repeated for each vaccine product.  See Fay, et al., (2012), for a similar idea predicting outcome in different species.  We use a nonparametric bootstrap to perform the inferences.
+
+These types of cross validation prediction will also be done for pairs of vaccine products. For example, build a prediction model using data from Vaccine A and use it to predict Vaccine B, predict using Vaccine A to predict Vaccine C, etc. 
+
+```{r, echo = FALSE}
+## Functions
+
+
+rmac.sqdiff<-function(x,y,alpha=.05,do.ci=T,na.rm=TRUE){
+###################################################################################################
+# Give a concordance correlation coefficient-like statistic 
+# using the Random Marginal Agreement Coefficient (RMAC) formulation (i.e., estimate A_r(d) )
+# See Fay, M.P. "Rethinking the Adjustment for Change in Agreement Coefficients"
+#
+# x=reponses from first instrument
+# y = responses from second instrument
+#
+# alpha= significance level
+#
+# do.ci =T means calculate confidence intervals
+###################################################################################################
+  nx<-length(x)
+  ny<-length(y)
+
+  if (abs(nx-ny)>0){
+    stop("x and y must be the same length") 
+  }
+
+
+  if (na.rm){
+    ismiss<- is.na(x) | is.na(y) 
+    x<-x[!ismiss]
+    y<-y[!ismiss]
+    nx<-length(x)
+    ny<-length(y)
+  }
+
+
+  v1<-mean(x)
+  v2<-mean(y)
+  v3<-mean(x*x)
+  v4<-mean(y*y)
+  v5<-mean(x*y)
+  n<-length(x)
+  xitilde<- .5* log((v3+v4+2*v5-(v1+v2)^2 )/(v3+v4-2*v5))
+  xihat<-xitilde + .5*log( n/(n-1) )
+
+  #rhotilde<-tanh(xitilde)
+  rhohat<-tanh(xihat)
+
+  if (do.ci){
+    sxx<-  (1/(n-1))* sum( (x - mean(x))^2 )
+    syy<-  (1/(n-1))* sum( (y - mean(y))^2 )
+    sxy<- (1/(n-1))* sum( (x-mean(x))*(y-mean(y)))
+
+    varxi<- (n/(n-2))*((v1-v2)^4 * ( sxx+syy+2*sxy ) + 2*(v1-v2)^2*(sxx^2 + syy^2 + 6*sxx*syy - 8*sxy^2) + 8*(sxx+syy-2*sxy)*(sxx*syy - sxy^2))/(2*n*(sxx+syy-2*sxy+(v1-v2)^2 )^2 *(sxx+syy+2*sxy ))
+    #lower.rhotilde<- tanh( xitilde - qnorm(1-alpha/2)*sqrt(varxi) )
+    #upper.rhotilde<- tanh( xitilde + qnorm(1-alpha/2)*sqrt(varxi) )
+    lower.rhohat<- tanh( xihat - qnorm(1-alpha/2)*sqrt(varxi) )
+    upper.rhohat<- tanh( xihat + qnorm(1-alpha/2)*sqrt(varxi) )
+
+
+    #out<-list(xitilde=xitilde,xihat=xihat,rhotilde=rhotilde,rhohat=rhohat,varxi=varxi,
+    #lower.rhotilde=lower.rhotilde,
+    #upper.rhotilde=upper.rhotilde,
+    #lower.rhohat=lower.rhohat,
+    #upper.rhohat=upper.rhohat)
+
+    out<-list(rhohat=rhohat,
+    lower.rhohat=lower.rhohat,
+    upper.rhohat=upper.rhohat)
+
+	  out<-c(rhohat,lower.rhohat,upper.rhohat,nx)
+
+	  names(out)<-c("RMAC with Squared Difference Func",paste("Lower",100*(1-alpha),"pct c.i."),
+	  paste("Upper",100*(1-alpha),"pct c.i."),"No. non-missing pairs")
+  } else{
+    out<-c(rhohat,nx) ; names(out)<-c("RMAC with Squared Difference Func","No. non-missing pairs") 
+    }
+  out
+}
+
+wkappa.rmac<-function(data,index=1:length(data[,1]),Wcode=0,as.table=F,s=1:k,alpha=.05,obs1=1,obs2=2,do.ci=T){
+###################################################################################################
+# Give Weighted Kappa using the Random Marginal Agreement Coefficient (RMAC) formulation
+# See Fay, M.P. (2005) "Random Marginal agreement coefficients: 
+# Rethinking the Adjustment for Chance when measuring Agreement" Biostatistics 6: 171-180.
+#
+# data= data frame or matrix
+#
+# index = the function is written this way so that it may be used by boot, only works with as.table=F
+#
+# Wcode=0 gives weights for the usual Kappa
+# Wcode=1 gives weights where 1-wij is proportional to |i -j|, these are the Cicchetti-Allison weights
+# Wcode=2 gives weights where 1-wij is proportional to (i -j)^2, these are the Fleiss-Cohen weights
+#
+# as.table=F   -  data is an n by (at least) 2 data frame or matrix with two columns representing two observations
+# 					obs1=first column, obs2=second column
+# as.table=T   - data is a k by k matrix with the ijth element representing the number of times obs1 answered i and obs2 answered j
+#
+# s= vector of scores for the possible categories
+# alpha= significance level
+# obs1= column of observation 1, if as.table=F
+# obs2= column of observation 2, if as.table=F
+#
+# do.ci =T means calculate confidence intervals
+###################################################################################################
+  if (as.table){
+    m<- data
+  } else {
+      m<-table(data[index,obs1],data[index,obs2])
+      }
+  n<-sum(m) 
+  m<-m/n
+  k<-dim(m)[[1]]
+  pio<-0
+  piz<-0
+
+  row.m<- apply(m,1,sum)
+  col.m<-apply(m,2,sum)
+	
+
+  w<-matrix(0,k,k)
+  if (Wcode==0){
+	  for (i in 1:k){
+	    w[i,i]<-1
+        for (j in 1:k){
+			pio<-pio+ w[i,j]* m[i,j]
+			piz<-piz + w[i,j]*(.5*row.m[i]+.5*col.m[i])*(.5*row.m[j]+.5*col.m[j])
+		  }
+	  }
+  } else if (Wcode==1){
+	  for (i in 1:k){
+		  for (j in 1:k){
+			  w[i,j]<- 1- abs( s[i]-s[j] )/(s[k]-s[1])
+			  pio<-pio+ w[i,j]* m[i,j]
+			  piz<-piz + w[i,j]*(.5*row.m[i]+.5*col.m[i])*(.5*row.m[j]+.5*col.m[j])
+		  }
+	  }
+  } else if (Wcode==2){
+	  for (i in 1:k){
+		  for (j in 1:k){
+			  w[i,j]<- 1 - ( s[i]-s[j] )^2/(s[k]-s[1])^2
+			  pio<-pio+ w[i,j]* m[i,j]
+			  piz<-piz + w[i,j]*(.5*row.m[i]+.5*col.m[i])*(.5*row.m[j]+.5*col.m[j])
+		  }
+	  }
+  }
+
+  if (piz==1){
+    wkappa<-1 ;  warning("chance agreement is 1, kappa set to 1 but really undefined") 
+  } else {
+    wkappa<- (pio - piz)/(1 - piz)
+    }
+
+  #print(w)
+  if (do.ci){
+
+    if (wkappa==1 | wkappa==-1){
+      lower.kap<- -1 ; upper.kap<-1 ; warning("confidence interval not able to be calculated")
+      } else{
+        W<-rep(0,k)
+	      D<-matrix(NA,k,k)
+	      for (g in 1:k){
+	        W[g]<- .5* sum( w[g,]*(row.m + col.m) )
+	       }
+        for (g in 1:k){
+  		    for (h in 1:k){
+		        D[g,h]<- (w[g,h] - 2*(W[g]+W[h]))/(2*(1+pio-2*piz)) + w[g,h]/(2*(1-pio))
+		      }
+	       } 
+
+      sig2.1<-sig2.2<-0
+  	  for (g in 1:k){
+		    for (h in 1:k){
+			    sig2.1<-sig2.1+m[g,h]*(D[g,h])^2 
+          sig2.2<-sig2.2+m[g,h]*D[g,h]	
+		    }
+	    }
+
+      sig2<- sig2.1 - sig2.2^2
+	    beta<-.5* log( (1+wkappa)/(1-wkappa) )
+	    lower.kap<- tanh( beta - qnorm(1-alpha/2)*sqrt(sig2/n) )
+	    upper.kap<- tanh( beta + qnorm(1-alpha/2)*sqrt(sig2/n) )
+   } #end else 
+
+	  out<-c(wkappa,lower.kap,upper.kap)
+
+	  names(out)<-c(paste("weighted Kappa, RMAC, W=",Wcode),paste("Lower",100*(1-alpha),"pct c.i."),
+	  paste("Upper",100*(1-alpha),"pct c.i."))
+  } else {
+    out<-wkappa ;names(out)<-c(paste("weighted Kappa, RMAC, W=",Wcode))
+    }
+  out
+}
+
+#Function to get bootstrap RMAC correlations
+boot.rmac <- function(df, i) {
+  #Select bootstrap sample with replacement
+  df2 <- df[i, ]
+  #Get RMAC correlation for each bootstrap sample
+  return(rmac.sqdiff(df2$x, df2$y)[1])
+}
+
+
+#Exclude: the vaccine product that is NOT being used to fit the model and is used only for prediction
+#Include: the vaccine product(s) used to fit the model
+#mod: the type of model selected from 6.4.1
+#R: number of bootstrap samples
+rmac <- function(logX, logY, exclude = c("Moderna", "Novavax", "Sanofi", "Janssen"), include = c("Moderna", "Novavax", "Sanofi", "Janssen"),
+                 manuf = D$manuf,
+                 mod = c("lm", "exp", "ns5", "seg", "4pl"), R=5000) {
+  #Create data frame with all data
+  df <- data.frame(manuf=manuf, x=logX, y=logY)
+  df <- df[complete.cases(df), ]
+  #Data to fit model on, vaccine products to include
+  input <- df[df$manuf %in% include, ]
+  #Data to test model fit, vaccine product to exclude from model
+  outcome <- df[df$manuf %in% exclude, ]
+  
+  #Fit model based on type from 6.4.1 and get predicted values
+  if (mod == "lm") {
+    mod.fit <- lm(y~x, data=input)
+    preds <- predict(mod.fit, newdata = data.frame(x=outcome$x))
+  }
+  if (mod == "exp") {
+    mod.fit <- nls(y ~ I(a*exp(b*x)), data = input, start = list(a = 1, b = 1))
+    preds <- predict(mod.fit, newdata = data.frame(x=outcome$x))
+  }
+  if (mod == "ns5") {
+    mod.fit <- lm(y~ns(x, 5), data=input)
+    preds <- predict(mod.fit, newdata = data.frame(x=outcome$x))
+  }
+  if (mod == "seg") {
+   mod.fit <- tryCatch(segmented(lm(y~x, data=input), seg.Z=~x, npsi=2, control = seg.control(seed=NULL, n.boot = 50)), error=function(e) NA) 
+   preds <- tryCatch(predict(mod.fit, newdata = data.frame(x=outcome$x)), error=function(e) NA)
+  }
+  if (mod == "4pl") {
+    mod.fit <- tryCatch(drm(y~x, fct=L.4(names=c("Slope", "Lower", "Upper", "Mid")),data=input, control=drmc(method="BFGS")), error=function(e) NA)
+    preds <- tryCatch(predict(mod.fit, newdata = data.frame(x=outcome$x)), error=function(e) NA)
+  }
+  
+  #Calculate RMAC correlation between actual vaccine product product outcome excluded and predicted values from model
+  if (length(preds)>1) {
+    res <- rmac.sqdiff(outcome$y, preds)[1]
+    #Bootstrap RMAC and get 95% bounds
+    boot_samp <- boot(data.frame(x=outcome$y, y=preds), boot.rmac, R=R)$t
+    lower <- quantile(boot_samp, 0.025, na.rm=T)
+    upper <- quantile(boot_samp, 0.975, na.rm=T)
+    #Return RMAC correlation and upper and lower 95% bootstrap quantiles
+    rmac_return <- data.frame(rmac = paste0(round(res, 2), " (", round(lower, 2), ", ", round(upper, 2), ")"), row.names = NULL)
+    return(rmac_return)
+  }
+  else {
+    return(NA)
+  }
+}
+
+
+#Function to get bootstrap RMAC correlations
+boot.rmac.bin <- function(df, i) {
+  #Select bootstrap sample with replacement
+  df2 <- df[i, ]
+  #Get RMAC correlation for each bootstrap sample
+  return(wkappa.rmac(df2, obs1=3, obs2=4)[1])
+}
+
+
+#Exclude: the vaccine product that is NOT being used to fit the model and is used only for prediction
+#Include: the vaccine product(s) used to fit the model
+#mod: the type of model selected from 6.4.2
+#R: number of bootstrap samples
+rmac.bin <- function(logX, binY, exclude = c("Moderna", "Novavax", "Sanofi", "Janssen"), include = c("Moderna", "Novavax", "Sanofi", "Janssen"),
+                 manuf = D$manuf,
+                 mod = "log", R=5000) {
+  #Create data frame with all data
+  df <- data.frame(manuf=manuf, x=logX, y=binY)
+  df <- df[complete.cases(df), ]
+  #Data to fit model on, vaccine products to include
+  input <- df[df$manuf %in% include, ]
+  #Data to test model fit, vaccine product to exclude from model
+  outcome <- df[df$manuf %in% exclude, ]
+  
+  #Fit model based on type from 6.4.2 and get predicted values
+  if (mod == "log") {
+    mod.fit <- glm(y~x, data=input, family="binomial")
+    preds <- predict(mod.fit, newdata = data.frame(x=outcome$x), type="response")
+    outcome$preds <- rbinom(nrow(outcome), 1, preds)
+    outcome$y <- factor(outcome$y, levels = c(0, 1))
+    outcome$preds <- factor(outcome$preds, levels = c(0, 1))
+  }
+  if (mod == "ns5") {
+    mod.fit <- glm(y~ns(x, 5), data=input, family="binomial")
+    preds <- predict(mod.fit, newdata = data.frame(x=outcome$x), type = "response")
+    outcome$preds <- rbinom(nrow(outcome), 1, preds)
+    outcome$y <- factor(outcome$y, levels = c(0, 1))
+    outcome$preds <- factor(outcome$preds, levels = c(0, 1))
+  }
+  if (mod == "seg") {
+   mod.fit <- tryCatch(segmented(glm(y~x, data=input, family="binomial"), seg.Z=~x, npsi=2, control = seg.control(seed=NULL, n.boot = 50)), error=function(e) NA) 
+   preds <- tryCatch(predict(mod.fit, newdata = data.frame(x=outcome$x), type="response"), error=function(e) NA)
+   outcome$preds <- rbinom(nrow(outcome), 1, preds)
+   outcome$y <- factor(outcome$y, levels = c(0, 1))
+   outcome$preds <- factor(outcome$preds, levels = c(0, 1))
+  }
+
+  
+  #Calculate RMAC correlation between actual vaccine product product outcome excluded and predicted values from model
+  if (length(preds)>1) {
+    res <- wkappa.rmac(outcome, obs1=3, obs2=4)[1]
+    #Bootstrap RMAC and get 95% bounds
+    boot_samp <- boot(outcome, boot.rmac.bin, R=R)$t
+    lower <- quantile(boot_samp, 0.025, na.rm=T)
+    upper <- quantile(boot_samp, 0.975, na.rm=T)
+    #Return RMAC correlation and upper and lower 95% bootstrap quantiles
+    rmac_return <- data.frame(rmac = paste0(round(res, 2), " (", round(lower, 2), ", ", round(upper, 2), ")"), row.names = NULL)
+    return(rmac_return)
+  }
+  else {
+    return(NA)
+  }
+}
+```
+
+
+```{r, echo = FALSE}
+cont.outcomes.log <- grep("log_VL|AUC", names(D))
+cont.outcomes.reg <- grep("VL Day 2|AUC", names(D))
+bin.outcomes <- grep("bin", names(D))
+
+immune.markers.log <- grep("log_MN|log_PsVNA|log_MSD", names(D))
+immune.markers.reg <- grep("(?<!log_)MN|(?<!log_)PsVNA|(?<!log_)MSD", names(D), perl=T)
+```
+
+
+## Numeric Viral Load
+
+```{r, echo=FALSE}
+prods <- as.character(unique(D$manuf))
+prods <- prods[-which(prods=="Placebo")]
+```
+
+```{r, echo = FALSE, results="asis"}
+combs2 <- expand.grid(immune.markers.log, cont.outcomes.log)
+combs2$immune <- names(D)[combs2[ ,1]]
+
+combs2$immune <- gsub("_", " ", combs2$immune)
+combs2$immune <- gsub(".", " ", combs2$immune, fixed=T)
+
+combs2$outcome <- names(D)[combs2[ ,2]]
+combs2$outcome <- gsub("_", " ", combs2$outcome)
+combs2$outcome <- gsub(".", " ", combs2$outcome, fixed=T)
+
+combs2 <- merge(combs2, cv_outcomes, by = c("immune", "outcome"))
+
+for (j in 1:length(prods)) {
+  exclude <- prods[j]
+  include <- prods[-which(prods==prods[j])]
+  outcomes2 <- matrix(NA, ncol=length(immune.markers.log), nrow = length(cont.outcomes.log))
+  set.seed(12345)
+  for (i in 1:nrow(combs2)) {
+    outcomes2[which(cont.outcomes.log == combs2[i, "Var2"]), which(immune.markers.log == combs2[i, "Var1"])] <- rmac(logX = D[ ,combs2[i, "Var1"]], logY = D[ ,combs2[i, "Var2"]], exclude=exclude, include=include, mod=combs2[i, "best.fit"], R = 5000)[1, 1]
+  }
+  
+  outcomes2 <- as.data.frame(outcomes2)
+  row.names(outcomes2) <- gsub("_", " ", names(D)[cont.outcomes.log])
+  row.names(outcomes2) <- gsub(".", " ", row.names(outcomes2), fixed=T)
+
+  names(outcomes2) <- gsub("_", " ", names(D)[immune.markers.log])
+  names(outcomes2) <- gsub(".", " ", names(outcomes2), fixed=T)
+  
+  rmac_mean <- apply(outcomes2, c(1, 2), function(x) {as.numeric(substr(x, 1, gregexpr(pattern="(", x, fixed = T)[[1]][1]-1))})
+  
+  assign(paste0("DF", j), rmac_mean)
+  
+  print(kable(outcomes2, row.names = TRUE, caption = paste0("RMAC with ", exclude, " Vaccine Product Excluded"), align = "c", escape = F) %>% kable_styling(latex_options=c(position = "HOLD_position")) %>% column_spec(1, width = "6em") %>% column_spec(c(2:(length(immune.markers.log)+1)), width = "3em"))
+  cat("\n")
+  
+}
+
+```
+
+
+```{r, echo = FALSE}
+dfAvg <- as.data.frame(Reduce(`+`, mget(paste0("DF", 1:4)))/4)
+
+kable(dfAvg, row.names = TRUE, caption = "RMAC Average", align = "c", escape = F, digits = 4) %>% kable_styling(latex_options=c(position = "HOLD_position"), font_size = 8) %>% column_spec(1, width = "5.5em") %>% column_spec(c(2:(length(immune.markers.log)+1)), width = "3.25em")
+```
+
+
+### Pairs of Vaccine Products 
+
+```{r, echo = FALSE, results = "asis"}
+combs <- expand.grid(prods, prods)
+combs <- combs[combs[, 1]!= combs[ ,2], ]
+
+
+for (j in 1:nrow(combs)) {
+  exclude <- combs[j, 1]
+  include <- combs[j, 2]
+  outcomes3 <- matrix(NA, ncol=length(immune.markers.log), nrow = length(cont.outcomes.log))
+  set.seed(12345)
+  for (i in 1:nrow(combs2)) {
+    outcomes3[which(cont.outcomes.log == combs2[i, "Var2"]), which(immune.markers.log == combs2[i, "Var1"])] <- rmac(logX = D[ ,combs2[i, "Var1"]], logY = D[ ,combs2[i, "Var2"]], exclude=exclude, include=include, mod=combs2[i, "best.fit"], R=5000)[1, 1]
+  }
+  
+  outcomes3 <- as.data.frame(outcomes3)
+  row.names(outcomes3) <- gsub("_", " ", names(D)[cont.outcomes.log])
+  row.names(outcomes3) <- gsub(".", " ", row.names(outcomes3), fixed=T)
+
+  names(outcomes3) <- gsub("_", " ", names(D)[immune.markers.log])
+  names(outcomes3) <- gsub(".", " ", names(outcomes3), fixed=T)
+  
+  print(kable(outcomes3, row.names = TRUE, caption = paste0("RMAC using ", include, " to predict ", exclude), align = "c", escape = F) %>% kable_styling(latex_options=c(position = "HOLD_position")) %>% column_spec(1, width = "6em") %>% column_spec(c(2:(length(immune.markers.log)+1)), width = "3em"))
+  cat("\n")
+  
+}
+
+
+```
+
+
+
+
+
+
+## Binary Viral Load
+
+```{r, echo = FALSE, warning=F, message=F, results = "asis"}
+combs3 <- expand.grid(immune.markers.log, bin.outcomes)
+
+for (j in 1:length(prods)) {
+  exclude <- prods[j]
+  include <- prods[-which(prods==prods[j])]
+  outcomes4 <- matrix(NA, ncol=length(immune.markers.log), nrow = length(bin.outcomes))
+  set.seed(12345)
+  for (i in 1:nrow(combs3)) {
+    outcomes4[which(bin.outcomes == combs3[i, 2]), which(immune.markers.log == combs3[i, 1])] <- rmac.bin(logX = D[ ,combs3[i, 1]], binY = D[ ,combs3[i, 2]], exclude=exclude, include=include, mod="log")[1, 1]
+  }
+  
+  outcomes4 <- as.data.frame(outcomes4)
+  row.names(outcomes4) <- gsub("_", " ", names(D)[bin.outcomes])
+  row.names(outcomes4) <- gsub(".", " ", row.names(outcomes4), fixed=T)
+
+  names(outcomes4) <- gsub("_", " ", names(D)[immune.markers.log])
+  names(outcomes4) <- gsub(".", " ", names(outcomes4), fixed=T)
+  
+  rmac_mean <- apply(outcomes4, c(1, 2), function(x) {as.numeric(substr(x, 1, gregexpr(pattern="(", x, fixed = T)[[1]][1]-1))})
+  
+  assign(paste0("DFbin", j), rmac_mean)
+  
+  print(kable(outcomes4, row.names = TRUE, caption = paste0("Binary RMAC with ", exclude, " Vaccine Product Excluded"), align = "c", escape = F) %>% kable_styling(latex_options=c(position = "HOLD_position")) %>% column_spec(1, width = "6em") %>% column_spec(c(2:(length(immune.markers.log)+1)), width = "3em"))
+  cat("\n")
+  
+}
+
+```
+
+
+```{r, echo = FALSE}
+dfbinAvg <- as.data.frame(Reduce(`+`, mget(paste0("DFbin", 1:4)))/4)
+
+kable(dfbinAvg, row.names = TRUE, caption = "Binary RMAC Average", align = "c", escape = F, digits = 4) %>% kable_styling(latex_options=c(position = "HOLD_position"), font_size = 8) %>% column_spec(1, width = "5.5em") %>% column_spec(c(2:(length(immune.markers.log)+1)), width = "3.25em")
+```
+
+
+### Pairs of Vaccine Products 
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, results = "asis"}
+for (j in 1:nrow(combs)) {
+  exclude <- combs[j, 1]
+  include <- combs[j, 2]
+  outcomes5 <- matrix(NA, ncol=length(immune.markers.log), nrow = length(bin.outcomes))
+  set.seed(12345)
+  for (i in 1:nrow(combs3)) {
+    outcomes5[which(bin.outcomes == combs3[i, 2]), which(immune.markers.log == combs3[i, 1])] <- rmac.bin(logX = D[ ,combs3[i, 1]], binY = D[ ,combs3[i, 2]], exclude=exclude, include=include, mod="log")[1, 1]
+  }
+  
+  outcomes5 <- as.data.frame(outcomes5)
+  row.names(outcomes5) <- gsub("_", " ", names(D)[bin.outcomes])
+  row.names(outcomes5) <- gsub(".", " ", row.names(outcomes5), fixed=T)
+
+  names(outcomes5) <- gsub("_", " ", names(D)[immune.markers.log])
+  names(outcomes5) <- gsub(".", " ", names(outcomes5), fixed=T)
+  
+  print(kable(outcomes5, row.names = TRUE, caption = paste0("Binary RMAC using ", include, " to predict ", exclude), align = "c", escape = F) %>% kable_styling(latex_options=c(position = "HOLD_position")) %>% column_spec(1, width = "6em") %>% column_spec(c(2:(length(immune.markers.log)+1)), width = "3em"))
+  cat("\n")
+  
+}
+```
+
+
+
+

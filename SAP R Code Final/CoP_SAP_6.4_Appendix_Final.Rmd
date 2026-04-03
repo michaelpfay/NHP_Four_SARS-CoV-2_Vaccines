@@ -1,0 +1,340 @@
+---
+title: "CoP SAP 6.4 Appendix"
+author: "Allyson Mateja"
+date:  "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  pdf_document:
+    includes:
+      in_header: reformat_paragraph.tex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+library(kableExtra)
+library(ggplot2)
+library(RColorBrewer)
+library(boot)
+library(dplyr)
+library(readxl)
+library(ggpubr)
+library(saws)
+```
+
+
+```{r, echo = FALSE}
+#Functions
+
+#Function to get bootstrap measures of Spearman's correlation between 2 measures
+boot.spearman_ci <- function(df, i) {
+  df2 <- df[i, ]
+  return(cor(df2$logx, df2$logy, use = "complete.obs"))
+}
+
+#Function to get Spearman's correlation and 95% CI by bootstrap
+cor_return_boot <- function(logx, logy, R=5000) {
+  #Get Spearman's correlation
+  df1 <- data.frame(logx=logx, logy=logy)
+  df1 <- df1[complete.cases(df1), ]
+  df <- data.frame(cbind(rank(df1$logx), rank(df1$logy)))
+  names(df) <- c("logx", "logy")
+  cor_num <- cor.test(df$logx, df$logy)$estimate
+  #Do 5000 bootstrap samples to calculate Spearman's CI, and get 2.5 %ile and 97.5 %ile as
+  #95% bootstrap confidence bands
+  boot_samp <- boot(df, boot.spearman_ci, R=R)$t
+  lower <- quantile(boot_samp, 0.025)
+  upper <- quantile(boot_samp, 0.975)
+  
+  cor_return <- data.frame(result = paste0(round(cor_num, 2), " (", round(lower, 2), ", ", round(upper, 2), ")"), row.names = NULL)
+  
+  return(cor_return)
+}
+
+#Function to get Spearman's correlation and 95% CI
+cor_return <- function(logx, logy) {
+  #Get Spearman's correlation
+  #Determine ranks for X and Y
+  
+  df1 <- data.frame(logx=logx, logy=logy)
+  df1 <- df1[complete.cases(df1), ]
+  df <- data.frame(cbind(rank(df1$logx), rank(df1$logy)))
+  names(df) <- c("logx", "logy")
+  #Get upper and lower confidence bounds using Pearson's correlation on the ranks
+  out <- cor.test(df$logx, df$logy, use="complete.obs")
+  lower <- out$conf.int[1]
+  upper <- out$conf.int[2]
+  cor_num <- out$estimate
+  #Return Spearman's cor and lower & upper CI bounds as data frame
+  cor_return <- data.frame(result = paste0(round(cor_num, 2), " (", round(lower, 2), ", ", round(upper, 2), ")"), row.names = NULL)
+  return(cor_return)
+}
+
+
+#Function to calculate geometric mean using standard definition
+geo_mean <- function(var) {
+  geo_mean <- 10^(mean(log10(var), na.rm=T))
+  return(geo_mean)
+}
+
+#Get geometric means and 95% CI by manufacturer and dose score
+geo_mean_df <- function(var, dose_score, manuf) {
+  df <- data.frame(var=var, dose_score = dose_score, manuf2=manuf)
+  means <- df %>% group_by(manuf2, dose_score) %>% summarize(mean = geo_mean(var), lower = tryCatch(10^(t.test(log10(var))$conf.int[1]), error=function(e) NA), upper = tryCatch(10^(t.test(log10(var))$conf.int[2]), error = function(e) NA), .groups="drop")
+  return(as.data.frame(means))
+}
+
+mean_df <- function(logVar, dose_score, manuf) {
+  df <- data.frame(var=logVar, dose_score = dose_score, manuf2=manuf)
+  means <- df %>% group_by(manuf2, dose_score) %>% summarize(mean = mean(var), lower = tryCatch(t.test((var))$conf.int[1], error=function(e) NA), upper = tryCatch(t.test((var))$conf.int[2], error=function(e) NA), .groups="drop")
+  return(as.data.frame(means))
+}
+
+#Plot dose score by either immune correlate or outcome
+#Panel for manufacturer
+#Include indicator of geometric mean and 95% CI
+
+cont_plot <- function(var, dose_char, manuf2, ylab, measure, caption.num, lod = NA) {
+  set.seed(12345)
+  if (measure == "AUC"){
+    means <- mean_df(var, dose_char, manuf2)
+    df <- data.frame(var=var, dose_char=dose_char, manuf2=manuf2)
+    p <- ggplot(df, aes(x=dose_char, y=var, col = manuf2)) + geom_jitter(width=0.2, height=0) + theme_bw() + theme(legend.position = "none", strip.background=element_rect(fill="white")) + xlab("Dose") + ylab(ylab) + scale_color_brewer(palette = "Dark2") + facet_wrap(~manuf2, ncol=2, nrow=3, scales = "free_x") + geom_point(data = means, aes(x=dose_score, y=mean, col=manuf2), shape=95, size=4) + geom_errorbar(data = means, aes(ymin = lower, ymax = upper, x=dose_score, col=manuf2), inherit.aes = F, width = 0.2)  + theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5)) + scale_y_continuous(limits = c(10, 100), trans="identity") 
+  } else if (measure == "VL") {
+    means <- geo_mean_df(var, dose_char, manuf2)
+    df <- data.frame(var=var, dose_char=dose_char, manuf2=manuf2)
+    ann.text <- data.frame(x = c(0.65, 0.55, 0.65, 0.65, 0.65, 0.5), y = rep(lod+100, length(levels(df$manuf2))), label = rep("1/2 LOD", length(levels(df$manuf2))), manuf2 = factor(levels(df$manuf2), levels = c("Janssen single dose", "Janssen two dose", "Moderna", "Novavax", "Sanofi", "Placebo")))
+    p <- ggplot(df, aes(x=dose_char, y=var, col = manuf2)) + geom_jitter(width=0.2, height=0) + theme_bw() + theme(legend.position = "none", strip.background=element_rect(fill="white")) + xlab("Dose") + ylab(ylab) + scale_color_brewer(palette = "Dark2") + facet_wrap(~manuf2, ncol=2, nrow=3, scales = "free_x") + geom_point(data = means, aes(x=dose_score, y=mean, col=manuf2), shape=95, size=4) + geom_errorbar(data = means, aes(ymin = lower, ymax = upper, x=dose_score, col=manuf2), inherit.aes = F, width = 0.2)  + theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5)) + geom_hline(yintercept = lod, linetype = "dashed") + geom_text(data=ann.text, aes(x=x, y=y, label=label), col="black", size=2) + scale_y_continuous(trans = "log10", limits = c(1, 500000000)) 
+  }
+  p<-annotate_figure(p, fig.lab = paste0("Figure 6.3.", caption.num), fig.lab.pos = "bottom.right")
+  return(p)
+}
+
+
+cont_plot2 <- function(var, dose_char, manuf2, cov, ylab, measure, caption.num, dose_score, x) {
+  set.seed(12345)
+  
+  if (measure == "AUC"){
+    means <- mean_df(var, dose_char, manuf2)
+    dat <- data.frame(var=var, dose_char=dose_char, manuf2=manuf2, cov=cov, dose_score=dose_score)
+    dat <<- cbind(dat, x)
+    
+    #dat <- dat[order(dat$cov), ]
+    
+    result <- quiet(mgee(var ~ Janssen:dose_score + Moderna:dose_score + Novavax:dose_score + Sanofi:dose_score, id=cov, data=dat, corstr = "independence", na.action = na.omit))
+    
+    dat <- dat[complete.cases(dat), ]
+    dat$fit <- result$fitted.values
+    
+    p <- ggplot(dat, aes(x=dose_char, y=var, col = cov)) + geom_jitter(width=0.2, height=0, size=1.5) + theme_bw() + theme(legend.position = "bottom", strip.background=element_rect(fill="white")) + xlab("Dose") + ylab(ylab) + scale_color_brewer(palette = "Dark2") + facet_wrap(~manuf2, ncol=2, nrow=3, scales = "free_x") + geom_point(data = means, aes(x=dose_score, y=mean), shape=95, size=4, col="black", inherit.aes=F) + geom_errorbar(data = means, aes(ymin = lower, ymax = upper, x=dose_score), inherit.aes = F, width = 0.2, col="black")  + theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5)) + scale_y_continuous(limits = c(10, 100), trans="identity")  + geom_point(aes(y=fit), col="grey", size=3) + geom_line(aes(y=fit, group=manuf2), col="grey") + labs(col = "Challenge Day")    
+    
+  } else if (measure == "VL") {
+    means <- mean_df(var, dose_char, manuf2)
+    dat <- data.frame(var=var, dose_char=dose_char, manuf2=manuf2, cov=cov, dose_score = dose_score)
+    dat <<- cbind(dat, x)
+    
+    #dat <- dat[order(dat$cov), ]
+    
+    result <- quiet(mgee(var ~ Janssen:dose_score + Moderna:dose_score + Novavax:dose_score + Sanofi:dose_score, id=cov, data=dat, corstr = "independence", na.action = na.omit))
+    dat <- dat[complete.cases(dat), ]
+    dat$fit <- result$fitted.values
+    
+    p <- ggplot(dat, aes(x=dose_char, y=10^var, col = cov)) + geom_jitter(width=0.2, height=0, size=1.5) + theme_bw() + theme(legend.position = "bottom", strip.background=element_rect(fill="white")) + xlab("Dose") + ylab(ylab) + scale_color_brewer(palette = "Dark2") + facet_wrap(~manuf2, ncol=2, nrow=3, scales = "free_x") + geom_point(data = means, aes(x=dose_score, y=10^mean), shape=95, size=4, col = "black", inherit.aes = F) + geom_errorbar(data = means, aes(ymin = 10^lower, ymax = 10^upper, x=dose_score), inherit.aes = F, width = 0.2, col = "black")  + theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5)) + scale_y_continuous(trans = "log10", limits = c(10, 500000000))  + geom_point(aes(y=10^fit), col="grey", size=3) + geom_line(aes(y=10^fit, group=manuf2), col="grey") + labs(col = "Challenge Day")     
+  }
+  p<-annotate_figure(p, fig.lab = paste0("Figure 6.3.", caption.num), fig.lab.pos = "bottom.right")
+  return(p)
+}
+
+
+marker_plot <- function(var, dose_char, manuf2, ylab, measure, caption.num, lod = NA) {
+  set.seed(12345)
+  if (measure == "MN"){
+    ymin <- 1
+    ymax <- 100000
+  }
+  if (measure == "MSD") {
+    ymin <- 10
+    ymax <- 4000000
+  }
+  if (measure == "PsVNA_ID50") {
+    ymin <- 0.1
+    ymax <- 90000
+  }
+  if (measure == "PsVNA_ID80") {
+    ymin <- 0.1
+    ymax <- 90000
+  }
+  means <- geo_mean_df(var, dose_char, manuf2)
+  df <- data.frame(var=var, dose_char=dose_char, manuf2=manuf2)
+  ann.text <- data.frame(x = c(0.65, 0.55, 0.65, 0.65, 0.65, 0.5), y = rep(lod*1.2, length(levels(df$manuf2))), label = rep("1/2 LOD", length(levels(df$manuf2))), manuf2 = factor(levels(df$manuf2), levels = c("Janssen single dose", "Janssen two dose", "Moderna", "Novavax", "Sanofi", "Placebo")))
+  p <- ggplot(df, aes(x=dose_char, y=var, col = manuf2)) + geom_jitter(width=0.2, height=0) + theme_bw() + theme(legend.position = "none", strip.background=element_rect(fill="white")) + xlab("Dose") + ylab(ylab) + scale_color_brewer(palette = "Dark2") + facet_wrap(~manuf2, ncol=2, nrow=3, scales = "free_x") + geom_point(data = means, aes(x=dose_score, y=mean, col=manuf2), shape=95, size=4) + geom_errorbar(data = means, aes(ymin = lower, ymax = upper, x=dose_score, col=manuf2), inherit.aes = F, width = 0.2)  + theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5)) + geom_hline(yintercept = lod, linetype = "dashed") + geom_text(data=ann.text, aes(x=x, y=y, label=label), col="black", size=2) + scale_y_continuous(trans = "log10", limits = c(ymin, ymax))
+  p<-annotate_figure(p, fig.lab = paste0("Figure 6.3.", caption.num), fig.lab.pos = "bottom.right")
+  return(p)
+}
+
+
+
+#Function for continuous GEE model
+#Input logY, dose_score, challenge day, and matrix of dummy variables for manufacturers
+#Indicator for whether or not to subset and exclude single dose group; dose_score_d1_half = single dose halved dose score; to use in that subset
+
+mgee_continuous <- function(logY, dose_score, challday, x, subset_ind = FALSE, dose_score2 = NA) {
+  dat <- data.frame(logY = logY, dose_score=dose_score, challday=challday, dose_score2 = dose_score2)
+  dat <<- cbind(dat, x)
+  if (subset_ind == TRUE) {
+    dat <<- subset(cbind(dat, x), dose_score == dose_score2)
+  }
+  sum <- saws(mgee(logY ~ Janssen:dose_score + Moderna:dose_score + Novavax:dose_score + Sanofi:dose_score, id=challday, data=dat, corstr = "independence", na.action = na.omit))
+  return(sum)
+}
+
+quiet <- function(x) { 
+  sink(tempfile()) 
+  on.exit(sink()) 
+  invisible(force(x)) 
+} 
+
+#Function to get Wilcoxon test p-values by manufacturer or overall
+wilcox <- function(dose_score, biny, manuf, by_manuf = T) {
+  df <- data.frame(dose_score=dose_score, y=biny, manuf=manuf)
+  if (by_manuf) {
+    tests <- df %>% group_by(manuf) %>% summarize(p=tryCatch(round(wilcox.test(dose_score~y, exact=F)$p.value, 3), error=function(e) NA), .groups = "drop")
+  }
+  else {
+    tests <- df %>% summarize(p=tryCatch(round(wilcox.test(dose_score~y, exact=F)$p.value, 3), error=function(e) NA))
+  }
+  return(as.data.frame(tests))
+}
+
+
+#Plot of immune correlate by binary outcome (above/below LOD)
+#Panels for manufacturer
+
+plot_dose_score <- function(x, biny, manuf, ylab, xlab, caption.num) {
+  df <- data.frame(x=x, new_y = biny, manuf2=manuf)
+  set.seed(12345)
+  p <- ggplot(df, aes(x = x, y=new_y, col = manuf2)) + geom_jitter(width=0, height=0.05) + facet_wrap(~manuf2) + theme_bw() + theme(legend.position = "none", strip.background=element_rect(fill="white")) + xlab("Immune Correlate") + ylab(ylab) + xlab(xlab) + scale_color_brewer(palette = "Dark2") + scale_x_continuous(trans="log10") + scale_y_continuous(breaks = c(0, 1), labels = c(0, 1))
+  p<-annotate_figure(p, fig.lab = paste0("Figure A6.4.", caption.num), fig.lab.pos = "bottom.right")
+  return(p)
+}
+
+
+plot_dose_score2 <- function(var, dose_char, manuf2, cov, ylab, caption.num, dose_score, x) {
+  dat <- data.frame(var=var, dose_char=dose_char, manuf2=manuf2, cov=cov, dose_score=dose_score)
+  dat <<- cbind(dat, x)
+    
+  #dat <- dat[order(dat$cov), ]
+    
+  result <- tryCatch(quiet(mgee(var ~ Janssen:dose_score + Moderna:dose_score + Novavax:dose_score + Sanofi:dose_score, id=cov, data=dat, corstr = "independence", na.action = na.omit, family = "binomial")), error=function(e) NA)
+    
+  dat <- dat[complete.cases(dat), ]
+  dat$fit <- result$fitted.values
+  
+  set.seed(12345)
+  p <- ggplot(dat, aes(x = dose_char, y=var, col = cov)) + geom_jitter(width=0.2, height=0.0) + facet_wrap(~manuf2, ncol=2, nrow=3, scales = "free_x") + theme_bw() + theme(legend.position = "bottom", strip.background=element_rect(fill="white")) + xlab("Dose") + ylab(ylab) + scale_color_brewer(palette = "Dark2") + scale_y_continuous(breaks = c(0, 1), labels = c(0, 1)) + theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5)) + geom_point(aes(y=fit), col="grey", size=3) + geom_line(aes(y=fit, group=manuf2), col="grey") + labs(col = "Challenge Day")
+  p<-annotate_figure(p, fig.lab = paste0("Figure 6.3.", caption.num), fig.lab.pos = "bottom.right") 
+  return(p)
+}
+
+
+
+#Function for GEE logistic regression
+#Input logY, dose_score, challenge day, lod, and matrix of dummy variables for manufacturers
+#Indicator for whether or not to subset and exclude single dose group; dose_score_d1_half = single dose halved dose score; to use in that subset
+
+mgee_categorical <- function(binY, dose_score, challday, x, subset_ind = FALSE, dose_score2 = NA) {
+  dat <- data.frame(dose_score=dose_score, challday=challday, new_y = binY, dose_score2 = dose_score2)
+  dat <<- cbind(dat, x)
+  if (subset_ind == TRUE) {
+    dat <<- subset(cbind(dat, x), dose_score == dose_score2)
+  }
+  sum <- tryCatch(saws(mgee(new_y ~ Janssen:dose_score + Moderna:dose_score + Novavax:dose_score + Sanofi:dose_score, id=challday, data=dat, corstr = "independence", family="binomial")), error=function(e) NA)
+  return(sum)
+}
+```
+
+
+
+```{r, echo = FALSE}
+D <- as.data.frame(readxl::read_xlsx("H:/Projects/Mike Fay/NHP/Final Data/allDat.xlsx"))
+D$manuf <- factor(D$`Vaccine Candidate`, levels = c("Janssen Single Dose", "Janssen Two Dose", "Moderna", "Novavax", "Sanofi", "Placebo"), labels = c("Janssen", "Janssen", "Moderna", "Novavax", "Sanofi", "Placebo"))
+D$`Challenge Day` <- factor(D$`Challenge Day`)
+```
+
+```{r, echo = FALSE}
+#Input doses from vaccine manufacturers
+doses <- data.frame(Subgroup = c("1A", "1B", "1C", "1D", "1E", "2A", "2B", "2C", "2D", "2E", "2F", "3A", "3B", "3C", "3D", "3E", "4A", "4B", "4C", "4D", "4E", "5A"), dose = c(30, 10, 3, 1, 0.3, 5*10^10, 1.25*10^10, 5*10^9, 2*10^9, 5*10^10, 5*10^9, 5, 1, 0.2, 0.04, 0.008, 15, 7.5, 3.75, 1.88, 0.94, 0), min_dose = c(rep(0.3, 5), rep(2*10^9, 6), rep(0.008, 5), rep(0.94, 5), NA))
+
+doses$Subgroup <- factor(doses$Subgroup)
+```
+
+```{r, echo = FALSE}
+#Merge actual dose information with data
+D_doses <- merge(D, doses, by = "Subgroup", all.x=T)
+
+#Calculate dose score
+D_doses$dose_score <- log10((10*D_doses$dose)/D_doses$min_dose)
+D_doses$dose_score <- ifelse(D_doses$Subgroup == "5A", yes=0, no=D_doses$dose_score)
+#Calculate second dose score for single dose groups, by dividing original dose in half
+D_doses$dose_score_d1_half <- ifelse(D_doses$Subgroup %in% c("2A", "2B", "2C", "2D"), yes = log10((10*(D_doses$dose/2))/(D_doses$min_dose/2)), no = ifelse(D_doses$Subgroup %in% c("2E", "2F"), yes = log10((10*(D_doses$dose))/(D_doses$min_dose/2)), no = D_doses$dose_score))
+D_doses$dose_score_double <- ifelse(D_doses$Subgroup %in% c("2E", "2F"), yes = log10((10*(D_doses$dose))/min(D_doses[D_doses$Subgroup %in% c("2E", "2F"), ]$dose)), no = ifelse(D_doses$Subgroup %in% c("2A", "2B", "2C", "2D"), yes = NA, D_doses$dose_score))
+
+
+D_doses$dose_unit <- ifelse(D_doses$manuf %in% c("Moderna", "Novavax", "Sanofi"), yes = "ug", no = ifelse(D_doses$manuf == "Janssen", yes = "Viral\nParticles", no = ""))
+
+D_doses$dose_char <- paste0(D_doses$dose, " ", D_doses$dose_unit)
+
+D_doses$dose_char <- factor(D_doses$dose_char, levels = c("0.008 ug", "0.04 ug", "0.2 ug", "0.3 ug", "0.94 ug", "1 ug", "1.88 ug", "3 ug", "3.75 ug", "5 ug", "7.5 ug", "10 ug", "15 ug", "30 ug", "2e+09 Viral\nParticles", "5e+09 Viral\nParticles", "1.25e+10 Viral\nParticles", "5e+10 Viral\nParticles", "0 "))
+```
+
+
+
+
+```{r, echo = FALSE, eval=F}
+ggplot(D_doses, aes(x=`Vaccine Candidate`, y=dose_score)) + geom_point()+ theme_bw() + labs(y = "Dose Score")
+
+```
+
+
+
+
+```{r, echo = FALSE}
+cont.outcomes.log <- grep("log_VL|AUC", names(D_doses))
+cont.outcomes.reg <- grep("VL Day 2|AUC", names(D_doses))
+bin.outcomes <- grep("bin", names(D_doses))
+
+immune.markers.log <- grep("log_MN|log_PsVNA|log_MSD", names(D_doses))
+immune.markers.reg <- grep("(?<!log_)MN|(?<!log_)PsVNA|(?<!log_)MSD", names(D_doses), perl=T)
+```
+
+
+
+
+```{r, echo = FALSE, fig.width = 10, fig.height=6}
+#Create new manufacturer grouping to separate Janssen two dose and single dose groups
+
+D_doses$manuf2 <- factor(ifelse(D_doses$manuf != "Janssen", yes = D_doses$manuf, no = ifelse(D_doses$Subgroup %in% c("2A", "2B", "2C", "2D"), yes = "Janssen single dose", no="Janssen two dose")), levels = c("Janssen single dose", "Janssen two dose", "2", "3", "4", "5"), labels = c("Janssen single dose", "Janssen two dose", "Moderna", "Novavax", "Sanofi", "Placebo"))
+```
+
+# 6.4 Appendix: Prediction of Post-Challenge Viral Load with Single Virus-Specific Antibody
+
+ 
+
+## Binary Viral Load
+
+We graphically plot the virus-specific antibody for each vaccine product, stratified by animals with a positive signal and animals with a negative signal.
+
+### Plots
+
+
+
+```{r, echo=FALSE, fig.width = 10, fig.height=6, warning=FALSE, message=F}
+set.seed(12345)
+for (i in 1:length(immune.markers.reg)) {
+  for (j in 1:length(bin.outcomes)) {
+    p<-plot_dose_score(D_doses[ ,immune.markers.reg[i]], D_doses[ ,bin.outcomes[j]], manuf = D_doses$manuf2, ylab = names(D_doses)[bin.outcomes[j]], xlab = names(D_doses)[immune.markers.reg][i], caption.num = ((i-1)*length(bin.outcomes))+j)
+    print(p)
+    writeLines("\n")
+  }
+}
+
+```

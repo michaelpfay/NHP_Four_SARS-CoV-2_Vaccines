@@ -1,0 +1,1062 @@
+---
+title: "Paper figures"
+author: "Allyson Mateja"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(ggplot2)
+library(GGally)
+library(dplyr)
+library(readxl)
+library(tidyr)
+library(corrplot)
+library(tibble)
+library(stringr)
+library(boot)
+library(saws)
+library(investr)
+library(ggpubr)
+```
+
+
+```{r, echo = FALSE}
+D <- as.data.frame(readxl::read_xlsx("S:/BRB/Staff Folders/Allyson Mateja/NHP/data/allDat.xlsx"))
+D$manuf <- factor(D$`Vaccine Candidate`, levels = c("Janssen Single Dose", "Janssen Two Dose", "Moderna", "Novavax", "Sanofi", "Placebo"), labels = c("Janssen", "Janssen", "Moderna", "Novavax", "Sanofi", "Placebo"))
+D$`Challenge Day` <- factor(D$`Challenge Day`)
+```
+
+
+```{r, echo = FALSE}
+cont.outcomes.log <- grep("log_VL|AUC", names(D))
+cont.outcomes.reg <- grep("VL Day 2|AUC", names(D))
+bin.outcomes <- grep("bin", names(D))
+
+immune.markers.log <- grep("log_MN|log_PsVNA|log_MSD", names(D))
+immune.markers.reg <- grep("(?<!log_)MN|(?<!log_)PsVNA|(?<!log_)MSD", names(D), perl=T)
+```
+
+
+```{r}
+immune_data_long <- D[ ,c(1:4, immune.markers.log)] %>% pivot_longer(cols = c(5:12), names_to = "marker", values_to = "Ab")
+
+immune_data_long$Assay <- sapply(immune_data_long$marker, function(x) {ifelse(length(unlist(strsplit(x, "_"))) %in% c(4, 6), unlist(strsplit(x, "_"))[2], paste0(unlist(strsplit(x, "_"))[c(2,3)], collapse = "_"))})
+
+immune_data_long$Day <- sapply(immune_data_long$marker, function(x) {ifelse(length(unlist(strsplit(x, "_"))) %in% c(6, 7), paste0(unlist(strsplit(x, "_"))[(length(unlist(strsplit(x, "_"))) - 3):length(unlist(strsplit(x, "_")))], collapse="_"), paste0(unlist(strsplit(x, "_"))[(length(unlist(strsplit(x, "_")))- 1): length(unlist(strsplit(x, "_")))], collapse = "_"))})
+```
+
+```{r}
+immune_data_wide <- immune_data_long %>% pivot_wider(id_cols = c(1:4, "Day"), names_from = "Assay", values_from = c("Ab"))
+
+immune_data_wide$Day <- factor(immune_data_wide$Day, levels = c("day_challenge", "2_weeks_prior_challenge"), labels = c("Day 0", "Day -14"))
+names(immune_data_wide)[c(6:9)] <- c("MN", "MSD ECL", "PsVNA ID50", "PsVNA ID80")
+```
+
+```{r, fig.height=10, fig.width=10, warning=F, message=F}
+p <- ggpairs(data = immune_data_wide, columns = c(6:9), 
+        mapping=aes(col = Day, fill=Day), 
+        diag = list(continuous = wrap("barDiag", bins=30, position = "identity", alpha=0.5, col="grey")), 
+        upper=list(continuous = wrap("cor", method = "spearman", use = "pairwise.complete.obs", stars=FALSE, size=5)),
+        progress=FALSE) +
+  theme_bw() + 
+  theme(strip.background = element_rect(fill = "white"), strip.text = element_text(size=13), axis.text = element_text(size=11)) +
+  scale_color_manual(values = c("deepskyblue4", "maroon4")) +
+  scale_fill_manual(values = c("deepskyblue4", "maroon4"))
+
+p[1, 1] <- p[1, 1] + scale_y_continuous(limits = c(0, 60), breaks = seq(0, 60, 20))
+p[2, 2] <- p[2, 2] + scale_y_continuous(limits = c(0, 60), breaks = seq(0, 60, 20))
+p[3, 3] <- p[3, 3] + scale_y_continuous(limits = c(0, 60), breaks = seq(0, 60, 20))
+p[4, 4] <- p[4, 4] + scale_y_continuous(limits = c(0, 60), breaks = seq(0, 60, 20))
+
+print(p)
+
+#ggsave("S:/BRB/Staff Folders/Allyson Mateja/NHP/figure6.tiff", width=10, height=10, units = "in", dpi=600)
+```
+
+
+```{r}
+vl_cor_matrix <- as.data.frame.matrix(cor(D[ ,cont.outcomes.log], method = "spearman", use = "pairwise.complete.obs"))
+
+vl_cor_matrix_long <- vl_cor_matrix %>% rownames_to_column("vl1") %>% pivot_longer(cols = c(2:13), values_to = "corr", names_to = "vl2")
+
+vl_cor_matrix_long$vl1 <- gsub("_", " ", vl_cor_matrix_long$vl1)
+vl_cor_matrix_long$vl2 <- gsub("_", " ", vl_cor_matrix_long$vl2)
+
+vl_cor_matrix_long$vl1 <- gsub(".", " ", vl_cor_matrix_long$vl1, fixed=T)
+vl_cor_matrix_long$vl2 <- gsub(".", " ", vl_cor_matrix_long$vl2, fixed=T)
+
+vl_cor_matrix_long$vl1 <- factor(vl_cor_matrix_long$vl1, levels = c("log VL Day2 PostChallenge NasalSwab Subgenomic", "log VL Day2 PostChallenge NasalSwab N1", "AUC Nasal Swab Subgenomic", "AUC Nasal Swab N1", "log VL Day2 PostChallenge OPswab Subgenomic", "log VL Day2 PostChallenge OPswab N1", "AUC OP Swab Subgenomic", "AUC OP Swab N1", "log VL Day2 PostChallenge BAL Subgenomic", "log VL Day2 PostChallenge BAL N1", "AUC BAL Subgenomic", "AUC BAL N1"), labels = c("VL Day 2 | Nasal | Subgenomic", "VL Day 2 | Nasal | N1", "AUC | Nasal | Subgenomic", "AUC | Nasal | N1", "VL Day 2 | OP | Subgenomic", "VL Day 2 | OP | N1", "AUC | OP | Subgenomic", "AUC | OP | N1", "VL Day 2 | BAL | Subgenomic", "VL Day 2 | BAL | N1", "AUC | BAL | Subgenomic", "AUC | BAL | N1"))
+vl_cor_matrix_long$vl2 <- factor(vl_cor_matrix_long$vl2, levels = c("log VL Day2 PostChallenge NasalSwab Subgenomic", "log VL Day2 PostChallenge NasalSwab N1", "AUC Nasal Swab Subgenomic", "AUC Nasal Swab N1", "log VL Day2 PostChallenge OPswab Subgenomic", "log VL Day2 PostChallenge OPswab N1", "AUC OP Swab Subgenomic", "AUC OP Swab N1", "log VL Day2 PostChallenge BAL Subgenomic", "log VL Day2 PostChallenge BAL N1", "AUC BAL Subgenomic", "AUC BAL N1"), labels = c("VL Day 2 | Nasal | Subgenomic", "VL Day 2 | Nasal | N1", "AUC | Nasal | Subgenomic", "AUC | Nasal | N1", "VL Day 2 | OP | Subgenomic", "VL Day 2 | OP | N1", "AUC | OP | Subgenomic", "AUC | OP | N1", "VL Day 2 | BAL | Subgenomic", "VL Day 2 | BAL | N1", "AUC | BAL | Subgenomic", "AUC | BAL | N1"))
+```
+
+```{r, fig.height=10, fig.width=10}
+ggplot(vl_cor_matrix_long, aes(x=vl1, y=vl2, fill = corr)) + geom_tile(col="black") + theme_bw() +
+  labs(x = "Viral Outcome 1", y = "Viral Outcome 2", fill = "Spearman\nCorrelation") +
+  theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5)) +
+  geom_text(aes(label = round(corr, 3)), col="white") +
+  scale_fill_viridis_c(direction = -1) +
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 25)) +
+  scale_y_discrete(labels = function(x) str_wrap(x, width = 25), limits=rev)
+
+#ggsave("S:/BRB/Staff Folders/Allyson Mateja/NHP/figure7.tiff", width=10, height=10, units = "in", dpi=600)
+```
+
+```{r, echo = FALSE}
+#Input doses from vaccine manufacturers
+doses <- data.frame(Subgroup = c("1A", "1B", "1C", "1D", "1E", "2A", "2B", "2C", "2D", "2E", "2F", "3A", "3B", "3C", "3D", "3E", "4A", "4B", "4C", "4D", "4E", "5A"), dose = c(30, 10, 3, 1, 0.3, 5*10^10, 1.25*10^10, 5*10^9, 2*10^9, 5*10^10, 5*10^9, 5, 1, 0.2, 0.04, 0.008, 15, 7.5, 3.75, 1.88, 0.94, 0), min_dose = c(rep(0.3, 5), rep(2*10^9, 6), rep(0.008, 5), rep(0.94, 5), NA))
+
+doses$Subgroup <- factor(doses$Subgroup)
+```
+
+```{r, echo = FALSE}
+#Merge actual dose information with data
+D_doses <- merge(D, doses, by = "Subgroup", all.x=T)
+
+#Calculate dose score
+D_doses$dose_score <- log10((10*D_doses$dose)/D_doses$min_dose)
+D_doses$dose_score <- ifelse(D_doses$Subgroup == "5A", yes=0, no=D_doses$dose_score)
+#Calculate second dose score for single dose groups, by dividing original dose in half
+D_doses$dose_score_d1_half <- ifelse(D_doses$Subgroup %in% c("2A", "2B", "2C", "2D"), yes = log10((10*(D_doses$dose/2))/(D_doses$min_dose/2)), no = ifelse(D_doses$Subgroup %in% c("2E", "2F"), yes = log10((10*(D_doses$dose))/(D_doses$min_dose/2)), no = D_doses$dose_score))
+D_doses$dose_score_double <- ifelse(D_doses$Subgroup %in% c("2E", "2F"), yes = log10((10*(D_doses$dose))/min(D_doses[D_doses$Subgroup %in% c("2E", "2F"), ]$dose)), no = ifelse(D_doses$Subgroup %in% c("2A", "2B", "2C", "2D"), yes = NA, D_doses$dose_score))
+
+
+D_doses$dose_unit <- ifelse(D_doses$manuf %in% c("Moderna", "Novavax", "Sanofi"), yes = "ug", no = ifelse(D_doses$manuf == "Janssen", yes = "Viral\nParticles", no = ""))
+
+D_doses$dose_char <- paste0(D_doses$dose, " ", D_doses$dose_unit)
+
+D_doses$dose_char <- factor(D_doses$dose_char, levels = c("0.008 ug", "0.04 ug", "0.2 ug", "0.3 ug", "0.94 ug", "1 ug", "1.88 ug", "3 ug", "3.75 ug", "5 ug", "7.5 ug", "10 ug", "15 ug", "30 ug", "2e+09 Viral\nParticles", "5e+09 Viral\nParticles", "1.25e+10 Viral\nParticles", "5e+10 Viral\nParticles", "0 "))
+```
+
+```{r}
+D_doses$manuf2 <- factor(ifelse(D_doses$manuf != "Janssen", yes = D_doses$manuf, no = ifelse(D_doses$Subgroup %in% c("2A", "2B", "2C", "2D"), yes = "Janssen single dose", no="Janssen two dose")), levels = c("Janssen single dose", "Janssen two dose", "2", "3", "4", "5"), labels = c("Janssen single dose", "Janssen two dose", "Moderna", "Novavax", "Sanofi", "Placebo"))
+```
+
+
+
+```{r, fig.height=10, fig.width=8}
+# geo_mean <- function(var) {
+#   geo_mean <- 10^(mean(log10(var), na.rm=T))
+#   return(geo_mean)
+# }
+
+lod <- log10(22.11)
+
+means <- D_doses %>% group_by(manuf2, dose_char) %>% summarize(mean = mean(log_MN_day_challenge, na.rm=T), lower = t.test(log_MN_day_challenge)$conf.int[1], upper = t.test(log_MN_day_challenge)$conf.int[2], .groups="drop")
+
+ann.text <- data.frame(x = c(0.65, 0.55, 0.65, 0.65, 0.65, 0.5), y = rep(lod*1.1, length(levels(D_doses$manuf2))), label = rep("1/2 LOD", length(levels(D_doses$manuf2))), manuf2 = factor(levels(D_doses$manuf2), levels = c("Janssen single dose", "Janssen two dose", "Moderna", "Novavax", "Sanofi", "Placebo")))
+
+set.seed(12345)
+ggplot() + 
+  geom_jitter(data = D_doses, height = 0, width=0.2, aes(col=manuf2, x=dose_char, y = log_MN_day_challenge), size=1.75) + 
+  geom_errorbar(data = means, aes(ymin = lower, ymax = upper, x=dose_char, col=manuf2), width = 0.2) +
+  geom_point(data = means, aes(x=dose_char, y=mean, col=manuf2), shape=95, size=4) + 
+  facet_wrap(~manuf2, scales = "free_x", nrow=3, ncol=2) + 
+  theme_bw() + 
+  theme(strip.background = element_rect(fill = "white"), axis.text.x = element_text(angle=90, hjust=1, vjust=0.5), legend.position = "none") +
+  labs(x = "Dose", y = "MN | Day 0") +
+  scale_y_continuous(limits = c(1, 5)) +
+  scale_color_brewer(palette = "Dark2") +
+  geom_hline(yintercept = lod, linetype = "dashed") + 
+  geom_text(data=ann.text, aes(x=x, y=y, label=label), col="black", size=2)
+
+#ggsave("S:/BRB/Staff Folders/Allyson Mateja/NHP/figure8.tiff", width=8, height=10, units = "in", dpi=600)
+```
+
+```{r, fig.height=10, fig.width=8}
+means_auc <- D_doses %>% group_by(manuf2, dose_char) %>% summarize(mean = mean(`AUC BAL.N1`, na.rm=T), lower = t.test(`AUC BAL.N1`)$conf.int[1], upper = t.test(`AUC BAL.N1`)$conf.int[2], .groups="drop")
+
+D_doses <- D_doses[order(D_doses$`Challenge Day`), ]
+
+manuf_Ind <- model.matrix(~relevel(manuf, ref = "Placebo"), data=D_doses)[ ,c(2:5)]
+colnames(manuf_Ind) <- c("Janssen", "Moderna", "Novavax", "Sanofi")
+D_doses2 <- cbind(D_doses, manuf_Ind)
+
+result <- mgee(`AUC BAL.N1` ~ Janssen:dose_score_d1_half + Moderna:dose_score_d1_half + Novavax:dose_score_d1_half + Sanofi:dose_score_d1_half, id=`Challenge Day`, data=D_doses2, corstr = "independence", na.action = na.omit)
+
+D_doses2$fit <- result$fitted.values
+
+dat_sum <- as.data.frame(D_doses2 %>% group_by(manuf2) %>% summarize(x=1, xend=length(unique(dose_char))))
+dat_sum$placebo <- unique(D_doses2[D_doses2$manuf2 == "Placebo", ]$fit)
+
+set.seed(12345)
+ggplot() + 
+  geom_jitter(data = D_doses, height = 0, width=0.2, aes(col=manuf2, x=dose_char, y = `AUC BAL.N1`), size=1.75) + 
+  geom_errorbar(data = means_auc, aes(ymin = lower, ymax = upper, x=dose_char, col=manuf2), width = 0.2) +
+  geom_point(data = means_auc, aes(x=dose_char, y=mean, col=manuf2), shape=95, size=4) + 
+  facet_wrap(~manuf2, scales = "free_x", nrow=3, ncol=2) + 
+  theme_bw() + 
+  theme(strip.background = element_rect(fill = "white"), axis.text.x = element_text(angle=90, hjust=1, vjust=0.5), legend.position = "none") +
+  labs(x = "Dose", y = "AUC | BAL | N1") +
+  scale_y_continuous(limits = c(10, 60)) +
+  scale_color_brewer(palette = "Dark2") +
+  geom_point(data=D_doses2, aes(x=dose_char, y=fit), col="grey", size=3) + 
+  geom_line(data=D_doses2, aes(x=dose_char, y=fit, group=manuf2), col="grey") +
+  geom_segment(data=dat_sum, aes(x=x, xend=xend, y=placebo, yend=placebo), linetype="dashed", col="grey", linewidth=1)
+
+#ggsave("S:/BRB/Staff Folders/Allyson Mateja/NHP/figure10.tiff", width=8, height=10, units = "in", dpi=600)
+```
+
+
+```{r, echo = FALSE, message=FALSE}
+
+marker_results <- data.frame(NULL)
+
+for (i in 1:length(immune.markers.log)) {
+  marker1 <- as.data.frame(t(D_doses[D_doses$manuf2 != "Placebo", ] %>% group_by(manuf2) %>% summarize(cor(dose_score, !! rlang::sym(names(D_doses)[immune.markers.log[i]]), method = "spearman", use = "pairwise.complete.obs"), .groups = "drop")))
+  row.names(marker1)[2] <- gsub("_", " ", names(D_doses)[immune.markers.log[i]])
+  row.names(marker1)[2] <- gsub(".", " ", row.names(marker1)[2], fixed=T)
+  marker_results <- rbind(marker_results, marker1[2, ])
+}
+
+names(marker_results) <- c("Janssen Single Dose", "Janssen Two Dose", "Moderna", "Novavax", "Sanofi")
+```
+
+```{r}
+marker_results_long <- marker_results %>% rownames_to_column("Ab") %>% pivot_longer(cols = c(2:6), values_to = "corr", names_to = "Vaccine")
+marker_results_long$corr <- as.numeric(marker_results_long$corr)
+
+marker_results_long$Ab <- factor(marker_results_long$Ab, levels = c("log MN 2 weeks prior challenge", "log MN day challenge", "log MSD ECL 2 weeks prior challenge", "log MSD ECL day challenge", "log PsVNA ID50 2 weeks prior challenge", "log PsVNA ID50 day challenge",  "log PsVNA ID80 2 weeks prior challenge", "log PsVNA ID80 day challenge"), labels = c("MN | Day -14", "MN | Day 0", "MSD ECL | Day -14", "MSD ECL | Day 0", "PsVNA ID50 | Day -14", "PsVNA ID50 | Day 0", "PsVNA ID80 | Day -14", "PsVNA ID80 | Day 0"))
+```
+
+
+```{r, fig.height=10, fig.width=10}
+ggplot(marker_results_long, aes(x=Vaccine, y=Ab, fill = corr)) + geom_tile(col="black") + theme_bw() +
+  labs(y = "Immune Marker", x = "Vaccine Candidate", fill = "Spearman\nCorrelation") +
+  #theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5)) +
+  geom_text(aes(label = round(corr, 3)), col="white") +
+  scale_fill_viridis_c(direction = -1) +
+  scale_y_discrete(labels = function(x) str_wrap(x, width = 25), limits=rev)
+
+#ggsave("S:/BRB/Staff Folders/Allyson Mateja/NHP/figure9.tiff", width=10, height=10, units = "in", dpi=600)
+```
+
+
+```{r, fig.width=10, fig.height=4}
+mod <- nls(`AUC BAL.N1` ~ I(a*exp(b*log_MN_day_challenge)), start = list(a = 1, b = 1), data = D_doses)
+predictions <- as.data.frame(predFit(mod, newdata=data.frame(log_MN_day_challenge=unique(D_doses$log_MN_day_challenge[!is.na(D_doses$log_MN_day_challenge)])), level=0.95, interval = "confidence"))
+predictions$x <- unique(D_doses$log_MN_day_challenge[!is.na(D_doses$log_MN_day_challenge)])
+
+
+mod2 <- lm(`AUC Nasal Swab.Subgenomic` ~ log_PsVNA_ID80_2_weeks_prior_challenge, data=D_doses)
+predictions2 <- as.data.frame(predict(mod2, newdata=data.frame(log_PsVNA_ID80_2_weeks_prior_challenge=unique(D_doses$log_PsVNA_ID80_2_weeks_prior_challenge[!is.na(D_doses$log_PsVNA_ID80_2_weeks_prior_challenge)])), level=0.95, interval = "confidence"))
+predictions2$x <- unique(D_doses$log_PsVNA_ID80_2_weeks_prior_challenge[!is.na(D_doses$log_PsVNA_ID80_2_weeks_prior_challenge)])
+    
+a <- ggplot() +
+  geom_point(data = D_doses, aes(x = log_MN_day_challenge, y = `AUC BAL.N1`), col="grey") +
+  theme_bw() +
+  labs(x = "MN | Day 0", y = "AUC | BAL | N1") +
+  geom_line(data=predictions, aes(x=x, y = fit)) +
+  geom_line(data=predictions, aes(x=x, y = upr)) +
+  geom_line(data=predictions, aes(x=x, y = lwr)) +
+  geom_ribbon(data=predictions, aes(ymin=lwr, ymax=upr, x=x), alpha=0.15) +
+  geom_text(data=data.frame(x=4.2, y = 50, label = "atop(`Adj. R`^2 == 0.522)"), aes(x = x, y = y, label=label), parse=T) +
+  geom_text(data=data.frame(x=4, y = 49, label = "Est. = 0.82 (0.79, 0.84), p<0.001"), aes(x = x, y = y, label=label), parse=F)
+
+b <- ggplot() +
+  geom_point(data = D_doses, aes(x = log_PsVNA_ID80_2_weeks_prior_challenge, y = `AUC Nasal Swab.Subgenomic`), col="grey") +
+  theme_bw() +
+  labs(x = "PsVNA ID80 | Day -14", y = "AUC | Nasal | Subgenomic") +
+  geom_line(data=predictions2, aes(x=x, y = fit)) +
+  geom_line(data=predictions2, aes(x=x, y = upr)) +
+  geom_line(data=predictions2, aes(x=x, y = lwr)) +
+  geom_ribbon(data=predictions2, aes(ymin=lwr, ymax=upr, x=x), alpha=0.15) +
+  geom_text(data=data.frame(x=3.93, y = 53.5, label = "atop(`Adj. R`^2 == 0.472)"), aes(x = x, y = y, label=label), parse=T) +
+  geom_text(data=data.frame(x=3.73, y = 53, label = "Est. = -4.0 (-4.73, -3.26), p<0.001"), aes(x = x, y = y, label=label), parse=F)
+
+ggarrange(a, b)
+
+#ggsave("S:/BRB/Staff Folders/Allyson Mateja/NHP/figure11.tiff", dpi=600, height=4, width=10, units="in")
+```
+
+
+```{r, echo = FALSE}
+cv_outcomes <- readxl::read_xlsx("C:/Users/matejaam/Desktop/NHP/cv_outcomes.xlsx")
+```
+
+
+```{r}
+adj_rsquared <- function(y, yhat, p){
+  #Caculate r squared using normal formula
+  r_sq <- 1 - (sum((y-yhat)^2)/sum((y-mean(y))^2))
+  n <- length(y) #Get sample size
+  #Adjust R squared by sample size and number of model parameters
+  adj_r_sq <- 1-(((n-1)*(1-r_sq))/(n-p))
+  return(adj_r_sq)
+}
+
+
+
+boot.pve_base_vacc_adj_r_sq_lm <- function(df, i) {
+  #Select bootstrap sample with replacement
+  df2 <- df[i, ]
+  #Get PVE for bootstrap sample
+  base_mod <- lm(logY ~ logX, data=df2)
+  base_r_sq <- adj_rsquared(y=df2$logY, yhat=predict(base_mod), p=base_mod$rank)
+  
+  base_dose_vacc_mod <- lm(logY ~ logX*dose_score*manuf, data=df2)
+  base_dose_vacc_r_sq <- adj_rsquared(y=df2$logY, yhat=predict(base_dose_vacc_mod), p=base_dose_vacc_mod$rank)
+  
+  #Calculate PVE
+  pve <- 100*(base_r_sq/base_dose_vacc_r_sq)
+  pve <- ifelse(pve < 0, 0, ifelse(pve > 100, 100, pve))
+  return(pve)
+  
+}
+
+boot.pve_base_vacc_adj_r_sq_exp <- function(df, i) {
+  #Select bootstrap sample with replacement
+  df2 <- df[i, ]
+  #Get PVE for bootstrap sample
+  base_mod <- glm(logY ~ logX, data=df2, family=gaussian(link="log"))
+  base_r_sq <- adj_rsquared(y=df2$logY, yhat=exp(predict(base_mod)), p=base_mod$rank)
+    
+  base_dose_vacc_mod <- glm(logY ~ logX*dose_score*manuf, data=df2, family=gaussian(link="log"))
+  base_dose_vacc_r_sq <- adj_rsquared(y=df2$logY, yhat=exp(predict(base_dose_vacc_mod)), p=base_dose_vacc_mod$rank)
+    
+  #Calculate PVE
+  pve <- 100*(base_r_sq/base_dose_vacc_r_sq)
+  pve <- ifelse(pve < 0, 0, ifelse(pve > 100, 100, pve))
+  return(pve)
+  
+}
+
+#Function to determine PVE and 95% bootstrap confidence interval for continuous outcome
+return_all_pve_base_vacc_adj_r_sq <- function(logX, logY, model, dose_score = D_doses$dose_score, manuf=D_doses$manuf, R=5000) {
+ 
+  #Create data frame from input variables
+  df <- data.frame(logX=logX, logY=logY, dose_score=dose_score, manuf=manuf)
+  df <- df[complete.cases(df), ]
+  
+  #df$dose_score <- factor(df$dose_score)
+  
+  
+  if (model == "lm") {
+    
+    base_mod <- lm(logY ~ logX, data=df)
+    base_r_sq <- adj_rsquared(y=df$logY, yhat=predict(base_mod), p=base_mod$rank)
+    
+    base_dose_vacc_mod <- lm(logY ~ logX*dose_score*manuf, data=df)
+    base_dose_vacc_r_sq <- adj_rsquared(y=df$logY, yhat=predict(base_dose_vacc_mod), p=base_dose_vacc_mod$rank)
+    
+    #Calculate PVE
+    pve <- 100*(base_r_sq/base_dose_vacc_r_sq)
+    pve <- ifelse(pve < 0, 0, ifelse(pve > 100, 100, pve))
+  
+    #Get bootstrap samples
+    boot_samp <- boot(df, boot.pve_base_vacc_adj_r_sq_lm, R=R)
+    ci <- tryCatch(boot.ci(boot_samp, type = "bca")$bca, error=function(e) boot.ci(boot_samp, type = "perc")$perc)
+  
+    #Get quantiles of bootstrap sample corresponding to 95% confidence interval
+    lower <- ci[4]
+    upper <- ci[5]
+    
+    lower <- ifelse(lower < 0, 0, ifelse(lower > 100, 100, lower))
+    upper <- ifelse(upper < 0, 0, ifelse(upper > 100, 100, upper))
+    
+  } else if (model == "exp") {
+    
+    base_mod <- glm(logY ~ logX, data=df, family=gaussian(link="log"))
+    base_r_sq <- adj_rsquared(y=df$logY, yhat=exp(predict(base_mod)), p=base_mod$rank)
+    
+    base_dose_vacc_mod <- glm(logY ~ logX*dose_score*manuf, data=df, family=gaussian(link="log"))
+    base_dose_vacc_r_sq <- adj_rsquared(y=df$logY, yhat=exp(predict(base_dose_vacc_mod)), p=base_dose_vacc_mod$rank)
+    
+    
+    #Calculate PVE
+    pve <- 100*(base_r_sq/base_dose_vacc_r_sq)
+    pve <- ifelse(pve < 0, 0, ifelse(pve > 100, 100, pve))
+  
+    #Get bootstrap samples
+    boot_samp <- boot(df, boot.pve_base_vacc_adj_r_sq_exp, R=R)
+    ci <- tryCatch(boot.ci(boot_samp, type = "bca")$bca, error=function(e) boot.ci(boot_samp, type = "perc")$perc)
+  
+    #Get quantiles of bootstrap sample corresponding to 95% confidence interval
+    lower <- ci[4]
+    upper <- ci[5]
+  
+    lower <- ifelse(lower < 0, 0, ifelse(lower > 100, 100, lower))
+    upper <- ifelse(upper < 0, 0, ifelse(upper > 100, 100, upper))
+  
+    
+  }
+  
+  #Make dataframe of results to return
+  boot_return <- data.frame(result = round(pve, 3), row.names = NULL)
+  return(boot_return)
+}
+
+```
+
+
+
+```{r, echo = FALSE, cache=T, warning=F, message=F}
+outcomes6 <- matrix(NA, ncol=length(immune.markers.log), nrow = length(cont.outcomes.log))
+combs2 <- expand.grid(immune.markers.log, cont.outcomes.log)
+combs2$immune <- names(D)[combs2[ ,1]]
+
+combs2$immune <- gsub("_", " ", combs2$immune)
+combs2$immune <- gsub(".", " ", combs2$immune, fixed=T)
+
+combs2$outcome <- names(D)[combs2[ ,2]]
+combs2$outcome <- gsub("_", " ", combs2$outcome)
+combs2$outcome <- gsub(".", " ", combs2$outcome, fixed=T)
+
+combs2 <- merge(combs2, cv_outcomes, by = c("immune", "outcome"))
+
+
+for (i in 1:nrow(combs2)) {
+  outcomes6[which(cont.outcomes.log == combs2[i, "Var2"]), which(immune.markers.log == combs2[i, "Var1"])] <- return_all_pve_base_vacc_adj_r_sq(logX=D_doses[ ,combs2[i, "Var1"]], logY=D_doses[ ,combs2[i, "Var2"]], dose_score = D_doses$dose_score_d1_half, model=combs2[i, "best.fit"], R=5000)[1, 1]
+}
+
+outcomes6 <- as.data.frame(outcomes6)
+row.names(outcomes6) <- gsub("_", " ", names(D_doses)[cont.outcomes.log])
+row.names(outcomes6) <- gsub(".", " ", row.names(outcomes6), fixed=T)
+
+names(outcomes6) <- gsub("_", " ", names(D_doses)[immune.markers.log])
+names(outcomes6) <- gsub(".", " ", names(outcomes6), fixed=T)
+```
+
+
+```{r}
+pve_long <- outcomes6 %>% rownames_to_column("vl") %>% pivot_longer(cols = c(2:9), values_to = "PVE", names_to = "Ab")
+
+pve_long$Ab <- factor(pve_long$Ab, levels = c("log MN 2 weeks prior challenge", "log MN day challenge", "log MSD ECL 2 weeks prior challenge", "log MSD ECL day challenge", "log PsVNA ID50 2 weeks prior challenge", "log PsVNA ID50 day challenge",  "log PsVNA ID80 2 weeks prior challenge", "log PsVNA ID80 day challenge"), labels = c("MN | Day -14", "MN | Day 0", "MSD ECL | Day -14", "MSD ECL | Day 0", "PsVNA ID50 | Day -14", "PsVNA ID50 | Day 0", "PsVNA ID80 | Day -14", "PsVNA ID80 | Day 0"))
+
+pve_long$vl <- factor(pve_long$vl, levels = c("log VL Day2 PostChallenge NasalSwab Subgenomic", "log VL Day2 PostChallenge NasalSwab N1", "AUC Nasal Swab Subgenomic", "AUC Nasal Swab N1", "log VL Day2 PostChallenge OPswab Subgenomic", "log VL Day2 PostChallenge OPswab N1", "AUC OP Swab Subgenomic", "AUC OP Swab N1", "log VL Day2 PostChallenge BAL Subgenomic", "log VL Day2 PostChallenge BAL N1", "AUC BAL Subgenomic", "AUC BAL N1"), labels = c("VL Day 2 | Nasal | Subgenomic", "VL Day 2 | Nasal | N1", "AUC | Nasal | Subgenomic", "AUC | Nasal | N1", "VL Day 2 | OP | Subgenomic", "VL Day 2 | OP | N1", "AUC | OP | Subgenomic", "AUC | OP | N1", "VL Day 2 | BAL | Subgenomic", "VL Day 2 | BAL | N1", "AUC | BAL | Subgenomic", "AUC | BAL | N1"))
+```
+
+
+
+```{r, fig.height=10, fig.width=10}
+ggplot(pve_long, aes(y=vl, x=Ab, fill = PVE)) + geom_tile(col="black") + theme_bw() +
+  labs(y = "Viral Outcome", x="Immune Marker") +
+  theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5)) +
+  geom_text(aes(label =PVE), col="white") +
+  scale_fill_viridis_c(direction = -1) +
+  scale_y_discrete(labels = function(x) str_wrap(x, width = 25), limits=rev) +
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 25))
+
+#ggsave("S:/BRB/Staff Folders/Allyson Mateja/NHP/figure12.tiff", width=10, height=10, units = "in", dpi=600)
+```
+
+
+
+
+```{r, echo = FALSE}
+## Functions
+
+
+rmac.sqdiff<-function(x,y,alpha=.05,do.ci=T,na.rm=TRUE){
+###################################################################################################
+# Give a concordance correlation coefficient-like statistic 
+# using the Random Marginal Agreement Coefficient (RMAC) formulation (i.e., estimate A_r(d) )
+# See Fay, M.P. "Rethinking the Adjustment for Change in Agreement Coefficients"
+#
+# x=reponses from first instrument
+# y = responses from second instrument
+#
+# alpha= significance level
+#
+# do.ci =T means calculate confidence intervals
+###################################################################################################
+  nx<-length(x)
+  ny<-length(y)
+
+  if (abs(nx-ny)>0){
+    stop("x and y must be the same length") 
+  }
+
+
+  if (na.rm){
+    ismiss<- is.na(x) | is.na(y) 
+    x<-x[!ismiss]
+    y<-y[!ismiss]
+    nx<-length(x)
+    ny<-length(y)
+  }
+
+
+  v1<-mean(x)
+  v2<-mean(y)
+  v3<-mean(x*x)
+  v4<-mean(y*y)
+  v5<-mean(x*y)
+  n<-length(x)
+  xitilde<- .5* log((v3+v4+2*v5-(v1+v2)^2 )/(v3+v4-2*v5))
+  xihat<-xitilde + .5*log( n/(n-1) )
+
+  #rhotilde<-tanh(xitilde)
+  rhohat<-tanh(xihat)
+
+  if (do.ci){
+    sxx<-  (1/(n-1))* sum( (x - mean(x))^2 )
+    syy<-  (1/(n-1))* sum( (y - mean(y))^2 )
+    sxy<- (1/(n-1))* sum( (x-mean(x))*(y-mean(y)))
+
+    varxi<- (n/(n-2))*((v1-v2)^4 * ( sxx+syy+2*sxy ) + 2*(v1-v2)^2*(sxx^2 + syy^2 + 6*sxx*syy - 8*sxy^2) + 8*(sxx+syy-2*sxy)*(sxx*syy - sxy^2))/(2*n*(sxx+syy-2*sxy+(v1-v2)^2 )^2 *(sxx+syy+2*sxy ))
+    #lower.rhotilde<- tanh( xitilde - qnorm(1-alpha/2)*sqrt(varxi) )
+    #upper.rhotilde<- tanh( xitilde + qnorm(1-alpha/2)*sqrt(varxi) )
+    lower.rhohat<- tanh( xihat - qnorm(1-alpha/2)*sqrt(varxi) )
+    upper.rhohat<- tanh( xihat + qnorm(1-alpha/2)*sqrt(varxi) )
+
+
+    #out<-list(xitilde=xitilde,xihat=xihat,rhotilde=rhotilde,rhohat=rhohat,varxi=varxi,
+    #lower.rhotilde=lower.rhotilde,
+    #upper.rhotilde=upper.rhotilde,
+    #lower.rhohat=lower.rhohat,
+    #upper.rhohat=upper.rhohat)
+
+    out<-list(rhohat=rhohat,
+    lower.rhohat=lower.rhohat,
+    upper.rhohat=upper.rhohat)
+
+	  out<-c(rhohat,lower.rhohat,upper.rhohat,nx)
+
+	  names(out)<-c("RMAC with Squared Difference Func",paste("Lower",100*(1-alpha),"pct c.i."),
+	  paste("Upper",100*(1-alpha),"pct c.i."),"No. non-missing pairs")
+  } else{
+    out<-c(rhohat,nx) ; names(out)<-c("RMAC with Squared Difference Func","No. non-missing pairs") 
+    }
+  out
+}
+
+wkappa.rmac<-function(data,index=1:length(data[,1]),Wcode=0,as.table=F,s=1:k,alpha=.05,obs1=1,obs2=2,do.ci=T){
+###################################################################################################
+# Give Weighted Kappa using the Random Marginal Agreement Coefficient (RMAC) formulation
+# See Fay, M.P. (2005) "Random Marginal agreement coefficients: 
+# Rethinking the Adjustment for Chance when measuring Agreement" Biostatistics 6: 171-180.
+#
+# data= data frame or matrix
+#
+# index = the function is written this way so that it may be used by boot, only works with as.table=F
+#
+# Wcode=0 gives weights for the usual Kappa
+# Wcode=1 gives weights where 1-wij is proportional to |i -j|, these are the Cicchetti-Allison weights
+# Wcode=2 gives weights where 1-wij is proportional to (i -j)^2, these are the Fleiss-Cohen weights
+#
+# as.table=F   -  data is an n by (at least) 2 data frame or matrix with two columns representing two observations
+# 					obs1=first column, obs2=second column
+# as.table=T   - data is a k by k matrix with the ijth element representing the number of times obs1 answered i and obs2 answered j
+#
+# s= vector of scores for the possible categories
+# alpha= significance level
+# obs1= column of observation 1, if as.table=F
+# obs2= column of observation 2, if as.table=F
+#
+# do.ci =T means calculate confidence intervals
+###################################################################################################
+  if (as.table){
+    m<- data
+  } else {
+      m<-table(data[index,obs1],data[index,obs2])
+      }
+  n<-sum(m) 
+  m<-m/n
+  k<-dim(m)[[1]]
+  pio<-0
+  piz<-0
+
+  row.m<- apply(m,1,sum)
+  col.m<-apply(m,2,sum)
+	
+
+  w<-matrix(0,k,k)
+  if (Wcode==0){
+	  for (i in 1:k){
+	    w[i,i]<-1
+        for (j in 1:k){
+			pio<-pio+ w[i,j]* m[i,j]
+			piz<-piz + w[i,j]*(.5*row.m[i]+.5*col.m[i])*(.5*row.m[j]+.5*col.m[j])
+		  }
+	  }
+  } else if (Wcode==1){
+	  for (i in 1:k){
+		  for (j in 1:k){
+			  w[i,j]<- 1- abs( s[i]-s[j] )/(s[k]-s[1])
+			  pio<-pio+ w[i,j]* m[i,j]
+			  piz<-piz + w[i,j]*(.5*row.m[i]+.5*col.m[i])*(.5*row.m[j]+.5*col.m[j])
+		  }
+	  }
+  } else if (Wcode==2){
+	  for (i in 1:k){
+		  for (j in 1:k){
+			  w[i,j]<- 1 - ( s[i]-s[j] )^2/(s[k]-s[1])^2
+			  pio<-pio+ w[i,j]* m[i,j]
+			  piz<-piz + w[i,j]*(.5*row.m[i]+.5*col.m[i])*(.5*row.m[j]+.5*col.m[j])
+		  }
+	  }
+  }
+
+  if (piz==1){
+    wkappa<-1 ;  warning("chance agreement is 1, kappa set to 1 but really undefined") 
+  } else {
+    wkappa<- (pio - piz)/(1 - piz)
+    }
+
+  #print(w)
+  if (do.ci){
+
+    if (wkappa==1 | wkappa==-1){
+      lower.kap<- -1 ; upper.kap<-1 ; warning("confidence interval not able to be calculated")
+      } else{
+        W<-rep(0,k)
+	      D<-matrix(NA,k,k)
+	      for (g in 1:k){
+	        W[g]<- .5* sum( w[g,]*(row.m + col.m) )
+	       }
+        for (g in 1:k){
+  		    for (h in 1:k){
+		        D[g,h]<- (w[g,h] - 2*(W[g]+W[h]))/(2*(1+pio-2*piz)) + w[g,h]/(2*(1-pio))
+		      }
+	       } 
+
+      sig2.1<-sig2.2<-0
+  	  for (g in 1:k){
+		    for (h in 1:k){
+			    sig2.1<-sig2.1+m[g,h]*(D[g,h])^2 
+          sig2.2<-sig2.2+m[g,h]*D[g,h]	
+		    }
+	    }
+
+      sig2<- sig2.1 - sig2.2^2
+	    beta<-.5* log( (1+wkappa)/(1-wkappa) )
+	    lower.kap<- tanh( beta - qnorm(1-alpha/2)*sqrt(sig2/n) )
+	    upper.kap<- tanh( beta + qnorm(1-alpha/2)*sqrt(sig2/n) )
+   } #end else 
+
+	  out<-c(wkappa,lower.kap,upper.kap)
+
+	  names(out)<-c(paste("weighted Kappa, RMAC, W=",Wcode),paste("Lower",100*(1-alpha),"pct c.i."),
+	  paste("Upper",100*(1-alpha),"pct c.i."))
+  } else {
+    out<-wkappa ;names(out)<-c(paste("weighted Kappa, RMAC, W=",Wcode))
+    }
+  out
+}
+
+#Function to get bootstrap RMAC correlations
+boot.rmac <- function(df, i) {
+  #Select bootstrap sample with replacement
+  df2 <- df[i, ]
+  #Get RMAC correlation for each bootstrap sample
+  return(rmac.sqdiff(df2$x, df2$y)[1])
+}
+
+
+#Exclude: the vaccine product that is NOT being used to fit the model and is used only for prediction
+#Include: the vaccine product(s) used to fit the model
+#mod: the type of model selected from 6.4.1
+#R: number of bootstrap samples
+rmac <- function(logX, logY, exclude = c("Moderna", "Novavax", "Sanofi", "Janssen"), include = c("Moderna", "Novavax", "Sanofi", "Janssen"),
+                 manuf = D$manuf,
+                 mod = c("lm", "exp", "ns5", "seg", "4pl"), R=5000) {
+  #Create data frame with all data
+  df <- data.frame(manuf=manuf, x=logX, y=logY)
+  df <- df[complete.cases(df), ]
+  #Data to fit model on, vaccine products to include
+  input <- df[df$manuf %in% include, ]
+  #Data to test model fit, vaccine product to exclude from model
+  outcome <- df[df$manuf %in% exclude, ]
+  
+  #Fit model based on type from 6.4.1 and get predicted values
+  if (mod == "lm") {
+    mod.fit <- lm(y~x, data=input)
+    preds <- predict(mod.fit, newdata = data.frame(x=outcome$x))
+  }
+  if (mod == "exp") {
+    mod.fit <- nls(y ~ I(a*exp(b*x)), data = input, start = list(a = 1, b = 1))
+    preds <- predict(mod.fit, newdata = data.frame(x=outcome$x))
+  }
+  if (mod == "ns5") {
+    mod.fit <- lm(y~ns(x, 5), data=input)
+    preds <- predict(mod.fit, newdata = data.frame(x=outcome$x))
+  }
+  if (mod == "seg") {
+   mod.fit <- tryCatch(segmented(lm(y~x, data=input), seg.Z=~x, npsi=2, control = seg.control(seed=NULL, n.boot = 50)), error=function(e) NA) 
+   preds <- tryCatch(predict(mod.fit, newdata = data.frame(x=outcome$x)), error=function(e) NA)
+  }
+  if (mod == "4pl") {
+    mod.fit <- tryCatch(drm(y~x, fct=L.4(names=c("Slope", "Lower", "Upper", "Mid")),data=input, control=drmc(method="BFGS")), error=function(e) NA)
+    preds <- tryCatch(predict(mod.fit, newdata = data.frame(x=outcome$x)), error=function(e) NA)
+  }
+  
+  #Calculate RMAC correlation between actual vaccine product product outcome excluded and predicted values from model
+  if (length(preds)>1) {
+    res <- rmac.sqdiff(outcome$y, preds)[1]
+    #Bootstrap RMAC and get 95% bounds
+    boot_samp <- boot(data.frame(x=outcome$y, y=preds), boot.rmac, R=R)$t
+    lower <- quantile(boot_samp, 0.025, na.rm=T)
+    upper <- quantile(boot_samp, 0.975, na.rm=T)
+    #Return RMAC correlation and upper and lower 95% bootstrap quantiles
+    rmac_return <- data.frame(rmac = paste0(round(res, 2), " (", round(lower, 2), ", ", round(upper, 2), ")"), row.names = NULL)
+    return(rmac_return)
+  }
+  else {
+    return(NA)
+  }
+}
+
+
+#Function to get bootstrap RMAC correlations
+boot.rmac.bin <- function(df, i) {
+  #Select bootstrap sample with replacement
+  df2 <- df[i, ]
+  #Get RMAC correlation for each bootstrap sample
+  return(wkappa.rmac(df2, obs1=3, obs2=4)[1])
+}
+
+
+#Exclude: the vaccine product that is NOT being used to fit the model and is used only for prediction
+#Include: the vaccine product(s) used to fit the model
+#mod: the type of model selected from 6.4.2
+#R: number of bootstrap samples
+rmac.bin <- function(logX, binY, exclude = c("Moderna", "Novavax", "Sanofi", "Janssen"), include = c("Moderna", "Novavax", "Sanofi", "Janssen"),
+                 manuf = D$manuf,
+                 mod = "log", R=5000) {
+  #Create data frame with all data
+  df <- data.frame(manuf=manuf, x=logX, y=binY)
+  df <- df[complete.cases(df), ]
+  #Data to fit model on, vaccine products to include
+  input <- df[df$manuf %in% include, ]
+  #Data to test model fit, vaccine product to exclude from model
+  outcome <- df[df$manuf %in% exclude, ]
+  
+  #Fit model based on type from 6.4.2 and get predicted values
+  if (mod == "log") {
+    mod.fit <- glm(y~x, data=input, family="binomial")
+    preds <- predict(mod.fit, newdata = data.frame(x=outcome$x), type="response")
+    outcome$preds <- rbinom(nrow(outcome), 1, preds)
+    outcome$y <- factor(outcome$y, levels = c(0, 1))
+    outcome$preds <- factor(outcome$preds, levels = c(0, 1))
+  }
+  if (mod == "ns5") {
+    mod.fit <- glm(y~ns(x, 5), data=input, family="binomial")
+    preds <- predict(mod.fit, newdata = data.frame(x=outcome$x), type = "response")
+    outcome$preds <- rbinom(nrow(outcome), 1, preds)
+    outcome$y <- factor(outcome$y, levels = c(0, 1))
+    outcome$preds <- factor(outcome$preds, levels = c(0, 1))
+  }
+  if (mod == "seg") {
+   mod.fit <- tryCatch(segmented(glm(y~x, data=input, family="binomial"), seg.Z=~x, npsi=2, control = seg.control(seed=NULL, n.boot = 50)), error=function(e) NA) 
+   preds <- tryCatch(predict(mod.fit, newdata = data.frame(x=outcome$x), type="response"), error=function(e) NA)
+   outcome$preds <- rbinom(nrow(outcome), 1, preds)
+   outcome$y <- factor(outcome$y, levels = c(0, 1))
+   outcome$preds <- factor(outcome$preds, levels = c(0, 1))
+  }
+
+  
+  #Calculate RMAC correlation between actual vaccine product product outcome excluded and predicted values from model
+  if (length(preds)>1) {
+    res <- wkappa.rmac(outcome, obs1=3, obs2=4)[1]
+    #Bootstrap RMAC and get 95% bounds
+    boot_samp <- boot(outcome, boot.rmac.bin, R=R)$t
+    lower <- quantile(boot_samp, 0.025, na.rm=T)
+    upper <- quantile(boot_samp, 0.975, na.rm=T)
+    #Return RMAC correlation and upper and lower 95% bootstrap quantiles
+    rmac_return <- data.frame(rmac = paste0(round(res, 2), " (", round(lower, 2), ", ", round(upper, 2), ")"), row.names = NULL)
+    return(rmac_return)
+  }
+  else {
+    return(NA)
+  }
+}
+```
+
+
+
+```{r, echo=FALSE}
+prods <- as.character(unique(D$manuf))
+prods <- prods[-which(prods=="Placebo")]
+```
+
+```{r, echo = FALSE, results="asis"}
+
+
+for (j in 1:length(prods)) {
+  exclude <- prods[j]
+  include <- prods[-which(prods==prods[j])]
+  outcomes2 <- matrix(NA, ncol=length(immune.markers.log), nrow = length(cont.outcomes.log))
+  set.seed(12345)
+  for (i in 1:nrow(combs2)) {
+    outcomes2[which(cont.outcomes.log == combs2[i, "Var2"]), which(immune.markers.log == combs2[i, "Var1"])] <- rmac(logX = D[ ,combs2[i, "Var1"]], logY = D[ ,combs2[i, "Var2"]], exclude=exclude, include=include, mod=combs2[i, "best.fit"], R = 5000)[1, 1]
+  }
+  
+  outcomes2 <- as.data.frame(outcomes2)
+  row.names(outcomes2) <- gsub("_", " ", names(D)[cont.outcomes.log])
+  row.names(outcomes2) <- gsub(".", " ", row.names(outcomes2), fixed=T)
+
+  names(outcomes2) <- gsub("_", " ", names(D)[immune.markers.log])
+  names(outcomes2) <- gsub(".", " ", names(outcomes2), fixed=T)
+  
+  rmac_mean <- apply(outcomes2, c(1, 2), function(x) {as.numeric(substr(x, 1, gregexpr(pattern="(", x, fixed = T)[[1]][1]-1))})
+  
+  assign(paste0("DF", j), rmac_mean)
+  
+}
+
+```
+
+
+```{r, echo = FALSE}
+dfAvg <- as.data.frame(Reduce(`+`, mget(paste0("DF", 1:4)))/4)
+```
+
+```{r}
+rmac_long <- dfAvg %>% rownames_to_column("vl") %>% pivot_longer(cols = c(2:9), values_to = "CC", names_to = "Ab")
+
+
+rmac_long$Ab <- factor(rmac_long$Ab, levels = c("log MN 2 weeks prior challenge", "log MN day challenge", "log MSD ECL 2 weeks prior challenge", "log MSD ECL day challenge", "log PsVNA ID50 2 weeks prior challenge", "log PsVNA ID50 day challenge",  "log PsVNA ID80 2 weeks prior challenge", "log PsVNA ID80 day challenge"), labels = c("MN | Day -14", "MN | Day 0", "MSD ECL | Day -14", "MSD ECL | Day 0", "PsVNA ID50 | Day -14", "PsVNA ID50 | Day 0", "PsVNA ID80 | Day -14", "PsVNA ID80 | Day 0"))
+
+rmac_long$vl <- factor(rmac_long$vl, levels = c("log VL Day2 PostChallenge NasalSwab Subgenomic", "log VL Day2 PostChallenge NasalSwab N1", "AUC Nasal Swab Subgenomic", "AUC Nasal Swab N1", "log VL Day2 PostChallenge OPswab Subgenomic", "log VL Day2 PostChallenge OPswab N1", "AUC OP Swab Subgenomic", "AUC OP Swab N1", "log VL Day2 PostChallenge BAL Subgenomic", "log VL Day2 PostChallenge BAL N1", "AUC BAL Subgenomic", "AUC BAL N1"), labels = c("VL Day 2 | Nasal | Subgenomic", "VL Day 2 | Nasal | N1", "AUC | Nasal | Subgenomic", "AUC | Nasal | N1", "VL Day 2 | OP | Subgenomic", "VL Day 2 | OP | N1", "AUC | OP | Subgenomic", "AUC | OP | N1", "VL Day 2 | BAL | Subgenomic", "VL Day 2 | BAL | N1", "AUC | BAL | Subgenomic", "AUC | BAL | N1"))
+```
+
+
+
+```{r, fig.height=10, fig.width=10}
+ggplot(rmac_long, aes(y=vl, x=Ab, fill = CC)) + geom_tile(col="black") + theme_bw() +
+  labs(y = "Viral Outcome", x="Immune Marker", fill=expression(CC[avg])) +
+  theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5)) +
+  geom_text(aes(label = round(CC, 3)), col="white") +
+  scale_fill_viridis_c(direction = -1) +
+  scale_y_discrete(labels = function(x) str_wrap(x, width = 25), limits = rev) +
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 25))
+
+#ggsave("S:/BRB/Staff Folders/Allyson Mateja/NHP/figure13.tiff", width=10, height=10, units = "in", dpi=600)
+```
+
+
+```{r, echo = FALSE}
+manuf_Ind2 <- model.matrix(~relevel(manuf, ref = "Placebo"), data=D_doses)[ ,c(2:5)]
+colnames(manuf_Ind2) <- c("Janssen", "Moderna", "Novavax", "Sanofi")
+D_doses3 <- cbind(D_doses, manuf_Ind2)
+x0 <- min(D_doses3$log_PsVNA_ID50_2_weeks_prior_challenge, na.rm=T)
+
+D_doses3$x_new <- D_doses3$log_PsVNA_ID50_2_weeks_prior_challenge - x0
+
+D_doses3$manuf <- factor(D_doses2$manuf, levels = c("Moderna", "Janssen", "Novavax", "Sanofi", "Placebo"))
+```
+
+```{r, echo=F}
+new_mod <- lm(`AUC Nasal Swab.Subgenomic` ~ Janssen:log_PsVNA_ID50_2_weeks_prior_challenge + Moderna:log_PsVNA_ID50_2_weeks_prior_challenge + Novavax:log_PsVNA_ID50_2_weeks_prior_challenge + Sanofi:log_PsVNA_ID50_2_weeks_prior_challenge + Janssen + Moderna + Novavax + Sanofi, data=D_doses3)
+mod_coef <- coef(new_mod)
+```
+
+```{r, echo=F}
+x <- seq(2.36, 4.9, 0.001)
+
+pred_df <- data.frame(log_PsVNA_ID50_2_weeks_prior_challenge=rep(x, 4), Janssen = c(rep(1, length(x)), rep(0, 3*length(x))), Moderna = c(rep(0, length(x)), rep(1, length(x)), rep(0, 2*length(x))), Novavax = c(rep(0, 2*length(x)), rep(1, length(x)), rep(0, length(x))), Sanofi = c(rep(0, 3*length(x)), rep(1, length(x))), check.names=F)
+preds <- as.data.frame(predict(new_mod, newdata = pred_df, interval = "confidence", level = 0.95))
+
+preds$x <- rep(x, 4)
+
+preds$Vaccine <- c(rep("Janssen", length(x)), rep("Moderna", length(x)), rep("Novavax", length(x)), rep("Sanofi", length(x)))
+
+preds$Vaccine <- factor(preds$Vaccine, levels = c("Moderna", "Janssen", "Novavax", "Sanofi"))
+
+preds <- preds[((preds$Vaccine == "Janssen" & preds$x <= round(max(D_doses3[D_doses3$manuf == "Janssen", ]$log_PsVNA_ID50_2_weeks_prior_challenge, na.rm=T), 3)) | (preds$Vaccine == "Moderna" & preds$x <= round(max(D_doses3[D_doses3$manuf == "Moderna", ]$log_PsVNA_ID50_2_weeks_prior_challenge, na.rm=T), 3)) | (preds$Vaccine == "Novavax" & preds$x >= round(min(D_doses3[D_doses3$manuf == "Novavax", ]$log_PsVNA_ID50_2_weeks_prior_challenge, na.rm=T), 3) & preds$x <= round(max(D_doses3[D_doses3$manuf == "Novavax", ]$log_PsVNA_ID50_2_weeks_prior_challenge, na.rm=T), 3)) | (preds$Vaccine == "Sanofi" & preds$x <= round(max(D_doses3[D_doses3$manuf == "Sanofi", ]$log_PsVNA_ID50_2_weeks_prior_challenge, na.rm=T), 3))), ]
+
+preds$ve_upr = 1-(preds$upr/mod_coef[1])
+preds$ve_lwr = 1-(preds$lwr/mod_coef[1])
+
+#x2 <- x+ min(D_doses3$log_PsVNA_ID50_2_weeks_prior_challenge, na.rm=T)
+
+plot <- data.frame(Janssen = mod_coef[1]+mod_coef[2]+(x*mod_coef[6]), Moderna = mod_coef[1]+mod_coef[3]+(x*mod_coef[7]), Novavax = mod_coef[1]+mod_coef[4]+(x*mod_coef[8]), Sanofi = mod_coef[1]+mod_coef[5]+(x*mod_coef[9]), x=x, check.names = F)
+
+plot_long <- plot %>% pivot_longer(cols = c(1:4), names_to = "Vaccine", values_to = "e_y")
+
+plot_long$ve <- 1 - (plot_long$e_y/mod_coef[1])
+
+plot_long <- plot_long[((plot_long$Vaccine == "Janssen" & plot_long$x <= round(max(D_doses3[D_doses3$manuf == "Janssen", ]$log_PsVNA_ID50_2_weeks_prior_challenge, na.rm=T), 3)) | (plot_long$Vaccine == "Moderna" & plot_long$x <= round(max(D_doses3[D_doses3$manuf == "Moderna", ]$log_PsVNA_ID50_2_weeks_prior_challenge, na.rm=T), 3)) | (plot_long$Vaccine == "Novavax" & plot_long$x >= round(min(D_doses3[D_doses3$manuf == "Novavax", ]$log_PsVNA_ID50_2_weeks_prior_challenge, na.rm=T), 3) & plot_long$x <= round(max(D_doses3[D_doses3$manuf == "Novavax", ]$log_PsVNA_ID50_2_weeks_prior_challenge, na.rm=T), 3)) | (plot_long$Vaccine == "Sanofi" & plot_long$x <= round(max(D_doses3[D_doses3$manuf == "Sanofi", ]$log_PsVNA_ID50_2_weeks_prior_challenge, na.rm=T), 3))), ]
+
+plot_long$Vaccine <- factor(plot_long$Vaccine, levels = c("Moderna", "Janssen", "Novavax", "Sanofi"))
+
+D_doses3$ve <- 1-(D_doses3$`AUC Nasal Swab.Subgenomic`/mod_coef[1])
+
+dose_sum <- as.data.frame(D_doses3 %>% group_by(manuf, dose_score_d1_half) %>% summarize(mean_x = mean(log_PsVNA_ID50_2_weeks_prior_challenge, na.rm=T), mean_y = mean(`AUC Nasal Swab.Subgenomic`, na.rm=T),
+                                                                                          mean_ve = mean(ve, na.rm=T),
+                                                                                         lower_x = tryCatch(t.test(log_PsVNA_ID50_2_weeks_prior_challenge)$conf.int[1], error=function(e) {NA}), 
+                                                                                         upper_x = tryCatch(t.test(log_PsVNA_ID50_2_weeks_prior_challenge)$conf.int[2], error=function(e) {NA}),
+                                                                                         lower_y = tryCatch(t.test(`AUC Nasal Swab.Subgenomic`)$conf.int[1], error=function(e) {NA}), 
+                                                                                         upper_y = tryCatch(t.test(`AUC Nasal Swab.Subgenomic`)$conf.int[2], error=function(e) {NA}), 
+                                                                                         lower_ve = tryCatch(t.test(ve)$conf.int[1], error=function(e) {NA}), 
+                                                                                         upper_ve = tryCatch(t.test(ve)$conf.int[2], error=function(e) {NA}), .groups="drop"))
+
+names(dose_sum)[1] <- "Vaccine"
+dose_sum$Vaccine <- factor(dose_sum$Vaccine, levels = c("Moderna", "Janssen", "Novavax", "Sanofi", "Placebo"))
+
+# mod_overall <- lm(`AUC Nasal Swab.Subgenomic` ~ log_PsVNA_ID50_2_weeks_prior_challenge, data=D_doses3)
+# plot_overall <- data.frame(x = x2, e_y = 57.508 + (x2*-4.679))
+# plot_overall$ve <- 1 - (plot_overall$e_y/57.508)
+```
+
+
+```{r, echo = F, warning=F, message=F, fig.height=6, fig.width=10, eval=F}
+ggplot() +
+  geom_line(data = plot_long, aes(x = x, y=e_y, col = Vaccine), linewidth=1.2) +
+  #geom_line(data = plot_overall, aes(x=x, y=e_y), col="grey", linewidth=1.2) +
+  geom_point(data = dose_sum, aes(x=mean_x, y = mean_y, col = Vaccine), size=2.5) +
+  geom_segment(data=dose_sum, aes(x = lower_x, xend = upper_x, y = mean_y, yend = mean_y, col = Vaccine), linewidth=0.2, alpha=0.5) + 
+  geom_segment(data=dose_sum, aes(x = mean_x, xend = mean_x, y = lower_y, yend = upper_y, col = Vaccine), linewidth=0.2, alpha=0.5) + 
+  theme_bw() +
+  scale_color_manual(values = c("plum3", "olivedrab3", "olivedrab4", "lightsteelblue3", "lightsalmon3", "black")) +
+  labs(x = "PsVNA ID50 | Day -14", y = "AUC | Nasal Swab | Subgenomic") +
+  scale_x_continuous(limits = c(2, 5), breaks = seq(2, 5, 0.5))  +
+  scale_y_continuous(limits = c(30, 60))
+#ggsave("H:/Projects/Mike Fay/NHP/plot_predicted_values.pdf", width=12, height=8)
+```
+
+```{r, echo = F, warning=F, message=F, fig.height=6, fig.width=10, eval=F}
+ggplot() +
+  #geom_line(data = plot_overall, aes(x=x, y=e_y), col="grey", linewidth=1.2) +
+  geom_line(data = preds, aes(x=x, y = lwr, col = Vaccine), linewidth=0.3) + 
+  geom_line(data = preds, aes(x=x, y = upr, col = Vaccine), linewidth=0.3) +
+  geom_ribbon(data = preds, aes(x=x, ymin=lwr, ymax = upr, fill = Vaccine), alpha=0.2) +
+  geom_line(data = plot_long, aes(x = x, y=e_y, col = Vaccine), linewidth=1.2) +
+   geom_point(data = dose_sum, aes(x=mean_x, y = mean_y, col = Vaccine), size=2.5) +
+  theme_bw() +
+  scale_color_manual(values = c("plum3", "olivedrab3", "olivedrab4", "lightsteelblue3", "lightsalmon3", "black")) +
+  scale_fill_manual(values = c("plum3", "olivedrab3", "olivedrab4", "lightsteelblue3", "lightsalmon3"), guide = "none") + 
+  labs(x = "PsVNA ID50 | Day -14", y = "AUC | Nasal Swab | Subgenomic") +
+  scale_x_continuous(limits = c(2, 5), breaks = seq(2, 5, 0.5))  +
+  scale_y_continuous(limits = c(30, 60))
+#ggsave("H:/Projects/Mike Fay/NHP/plot_predicted_values_ci.pdf", width=12, height=8)
+```
+
+
+
+```{r, echo = FALSE}
+doses <- D_doses3 %>% select(manuf, dose_score_d1_half) %>% group_by(manuf, dose_score_d1_half) %>% summarize(n=n(), .groups="drop") %>% ungroup() %>% arrange(manuf, dose_score_d1_half) %>% group_by(manuf) %>% mutate(tal=1:n()) %>% ungroup() %>% mutate(tal = ifelse(manuf == "Placebo", max(tal), tal)) %>% select(-n)
+
+D_doses3 <- merge(D_doses3, doses, by = c("manuf", "dose_score_d1_half"), all.x=T)
+```
+
+
+```{r, echo = FALSE, fig.width=8, fig.height=10}
+ggplot(D_doses3, aes(x = log_PsVNA_ID50_2_weeks_prior_challenge, fill = manuf, alpha = tal, group=tal)) +
+  geom_histogram(bins=20, col="grey65") +
+  theme_bw() + 
+  facet_wrap(~manuf, ncol=2, nrow=3) +
+  scale_x_continuous(breaks=seq(2, 5, 0.5)) +
+  scale_fill_manual(values = c("plum3", "olivedrab3", "lightsteelblue3", "lightsalmon3", "black")) +
+  theme(strip.background = element_rect(fill = "white"), legend.position ="none") +
+  coord_cartesian(xlim = c(2, 5)) +
+  labs(x = "PsVNA ID50 | Day -14", fill = "Vaccine", y = "Frequency") 
+#ggsave("S:/BRB/Staff Folders/Allyson Mateja/NHP/figure15.pdf", width=8, height=8)
+```
+
+
+```{r, echo = F, eval=F}
+ggplot(D_doses3, aes(x = log_PsVNA_ID50_2_weeks_prior_challenge, y = `AUC Nasal Swab.Subgenomic`, col = manuf)) +
+  geom_point() +
+  theme_bw()
+```
+
+
+```{r, echo = F, warning=F, message=F, fig.height=6, fig.width=10, eval=F}
+# y_axis_trans <- function(y) {
+#   (1-10^(-y))
+# }
+# 
+# in_y_axis_trans <- function(y) {
+#   (-log10(1-y)) 
+# }
+
+ggplot() +
+  geom_line(data = plot_long, aes(x = x, y=ve, col = Vaccine), linewidth=1.2) +
+  #geom_line(data = plot_overall, aes(x=x, y=ve), col="grey", linewidth=1) +
+  geom_point(data = dose_sum, aes(x=mean_x, y = mean_ve, col = Vaccine), size=2.5) +
+  geom_segment(data=dose_sum, aes(x = lower_x, xend = upper_x, y = mean_ve, yend = mean_ve, col = Vaccine), linewidth=0.2, alpha=0.5) + 
+  geom_segment(data=dose_sum, aes(x = mean_x, xend = mean_x, y = lower_ve, yend = upper_ve, col = Vaccine), linewidth=0.2, alpha=0.5) + 
+  theme_bw() +
+  scale_color_manual(values = c("plum3", "olivedrab3", "olivedrab4", "lightsteelblue3", "lightsalmon3", "black")) +
+  labs(x = "PsVNA ID50 | Day -14", y = "Vaccine Efficacy on Viral Load") +
+  scale_x_continuous(limits = c(2, 5), breaks = seq(2, 5, 0.5)) +
+  scale_y_continuous(limits = c(-0.2, 0.4))
+#ggsave("H:/Projects/Mike Fay/NHP/plot_vevl.pdf", width=12, height=8)
+```
+
+
+```{r, echo = F,  fig.height=6, fig.width=10}
+ggplot() +
+  #geom_line(data = plot_overall, aes(x=x, y=e_y), col="grey", linewidth=1.2) +
+  geom_line(data = preds, aes(x=x, y = ve_lwr, col = Vaccine), linewidth=0.3) + 
+  geom_line(data = preds, aes(x=x, y = ve_upr, col = Vaccine), linewidth=0.3) +
+  geom_ribbon(data = preds, aes(x=x, ymin=ve_lwr, ymax = ve_upr, fill = Vaccine), alpha=0.2) +
+  geom_line(data = plot_long, aes(x = x, y=ve, col = Vaccine), linewidth=1.2) +
+   geom_point(data = dose_sum, aes(x=mean_x, y = mean_ve, col = Vaccine), size=2.5) +
+  theme_bw() +
+  scale_color_manual(values = c("plum3", "olivedrab3", "lightsteelblue3", "lightsalmon3", "black")) +
+  scale_fill_manual(values = c("plum3", "olivedrab3", "lightsteelblue3", "lightsalmon3"), guide = "none") + 
+  labs(x = "PsVNA ID50 | Day -14", y = "Vaccine Efficacy on Viral Load") +
+  scale_x_continuous(limits = c(2, 5), breaks = seq(2, 5, 0.5))  +
+  scale_y_continuous(limits = c(-0.05, 0.4))
+#ggsave("S:/BRB/Staff Folders/Allyson Mateja/NHP/figure14.pdf", width=12, height=8)
+```
+
+```{r, echo=F}
+# plot <- data.frame(log_PsVNA_ID50_2_weeks_prior_challenge=rep(x, 5), manuf2 = c(rep("Janssen single dose", length(x)), rep("Janssen two dose", length(x)), rep("Moderna", length(x)), rep("Novavax", length(x)), rep("Sanofi", length(x))))
+# placebo <- data.frame(log_PsVNA_ID50_2_weeks_prior_challenge = x, manuf2 = rep("Placebo", length(x)))
+# 
+# preds_all <- as.data.frame(predict(new_mod, newdata = plot))
+# preds_placebo <- as.data.frame(rep(predict(new_mod, newdata = placebo), 5))
+# 
+# plot2 <- cbind(plot, preds_all, preds_placebo)
+# names(plot2)[c(3,4)] <- c("mean", "mean_placebo")
+# 
+# plot2$ve <- (1-(plot2$mean/plot2$mean_placebo))
+# plot2$rr <- (plot2$mean/plot2$mean_placebo)
+# 
+# plot_overall <- data.frame(log_PsVNA_ID50_2_weeks_prior_challenge=x, vaccine = rep(1, length(x)))
+# plot_overall$vaccine <- factor(plot_overall$vaccine, levels = c(0, 1))
+# placebo_overall <- data.frame(log_PsVNA_ID50_2_weeks_prior_challenge = x, vaccine = rep(0, length(x)))
+# placebo_overall$vaccine <- factor(placebo_overall$vaccine, levels = c(0, 1))
+# 
+# preds_all_overall <- as.data.frame(predict(mod_overall, newdata = plot_overall))
+# preds_placebo_overall <- as.data.frame(predict(mod_overall, newdata = placebo_overall))
+# 
+# plot_overall2 <- cbind(plot_overall, preds_all_overall, preds_placebo_overall)
+# names(plot_overall2)[c(2,3,4)] <- c("manuf2", "mean", "mean_placebo")
+# plot_overall2$manuf2 <- "Overall"
+# 
+# plot_overall2$ve <- (1-(plot_overall2$mean/plot_overall2$mean_placebo))
+# plot_overall2$rr <- (plot_overall2$mean/plot_overall2$mean_placebo)
+
+# plot_data <- rbind(plot2, plot_overall2)
+# plot_data$manuf2 <- factor(plot_data$manuf2, levels = c("Overall", "Janssen single dose", "Janssen two dose", "Moderna", "Novavax", "Sanofi"))
+```
+
+```{r, echo = F}
+# dose_sum <- as.data.frame(D_doses %>% group_by(manuf2, dose_score_d1_half) %>% summarize(log_PsVNA_ID50_2_weeks_prior_challenge = round(mean(log_PsVNA_ID50_2_weeks_prior_challenge, na.rm=T), 3), .groups="drop"))
+# dose_sum <- merge(dose_sum, plot_data, by = c("manuf2", "log_PsVNA_ID50_2_weeks_prior_challenge"), all.x=T) %>% filter(manuf2 != "Placebo")
+```
+
+```{r, echo=F, warning=F, message=F, fig.height=6, fig.width=10}
+# set.seed(12345)
+# ggplot() + 
+#   geom_line(data = plot_data, aes(x = log_PsVNA_ID50_2_weeks_prior_challenge, y=rr, col=manuf2)) + 
+#   geom_jitter(data=dose_sum, aes(x = log_PsVNA_ID50_2_weeks_prior_challenge, y = rr, col=manuf2, size=dose_score_d1_half), width=0, height=0.005) +
+#   theme_bw() + 
+#   scale_y_continuous(trans=c("log10", "reverse"), limits = c(1.01, 0.6), breaks = c(seq(1, 0.6, -0.1)), labels = c("0", "0.1", "0.2", "0.3", "0.4")) +
+#   scale_x_continuous(limits = c(2,5), breaks = seq(2,5,1)) +
+#   labs(y = "Percentage Reduction in Covid-19 Risk", x = "PsVNA ID50 | Day -14", col = "Vaccine", size = "Dose Score") +
+#   scale_color_manual(values = c("black", "#1B9E77", "#D95F02", "#7570B3", "#E7298A", "#66A61E")) +
+#   scale_size_continuous(range  = c(1, 4)) +
+#   guides(size=guide_legend(order=2), col=guide_legend(order=1))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
