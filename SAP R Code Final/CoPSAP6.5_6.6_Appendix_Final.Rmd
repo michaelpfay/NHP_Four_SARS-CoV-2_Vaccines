@@ -574,7 +574,7 @@ return_all_pve_base_vacc_cod <- function(logX, binY, dose_score = D_doses$dose_s
 
 
 ```{r, echo = FALSE}
-D <- as.data.frame(readxl::read_xlsx("H:/Projects/Mike Fay/NHP/Final Data/allDat.xlsx"))
+D <- as.data.frame(readxl::read_xlsx("./data/allDat.xlsx"))
 D$manuf <- factor(D$`Vaccine Candidate`, levels = c("Janssen Single Dose", "Janssen Two Dose", "Moderna", "Novavax", "Sanofi", "Placebo"), labels = c("Janssen", "Janssen", "Moderna", "Novavax", "Sanofi", "Placebo"))
 D$`Challenge Day` <- factor(D$`Challenge Day`)
 ```

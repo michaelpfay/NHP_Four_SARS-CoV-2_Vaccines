@@ -255,7 +255,7 @@ mgee_categorical <- function(binY, dose_score, challday, x, subset_ind = FALSE, 
 
 
 ```{r, echo = FALSE}
-D <- as.data.frame(readxl::read_xlsx("H:/Projects/Mike Fay/NHP/Final Data/allDat.xlsx"))
+D <- as.data.frame(readxl::read_xlsx("./data/allDat.xlsx"))
 D$manuf <- factor(D$`Vaccine Candidate`, levels = c("Janssen Single Dose", "Janssen Two Dose", "Moderna", "Novavax", "Sanofi", "Placebo"), labels = c("Janssen", "Janssen", "Moderna", "Novavax", "Sanofi", "Placebo"))
 D$`Challenge Day` <- factor(D$`Challenge Day`)
 ```
