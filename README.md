@@ -4,4 +4,4 @@ Documents related to a study: "Assessment of Protection Against SARS-CoV-2 Infec
 
 - Statistical Analysis Plan (NHP COP SAP V2 03 Mar 2022.docx) and
 - SAP Report (see folder README for details)
-- SAP R Code Final (not yet posted, see Github copy on C drive)
+- SAP R Code Final (see folder README for details)
