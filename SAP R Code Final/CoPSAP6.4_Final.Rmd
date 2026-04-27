@@ -1,0 +1,618 @@
+---
+title: "CoP SAP 6.4"
+author: "Allyson Mateja"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output: pdf_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+library(kableExtra)
+library(ggplot2)
+library(RColorBrewer)
+library(boot)
+library(dplyr)
+library(readxl)
+library(splines)
+library(segmented)
+library(drc)
+library(ggpubr)
+library(investr)
+library(dplyr)
+library(writexl)
+```
+
+```{r, echo = FALSE}
+###Functions 
+
+
+#Function for stratified random sampling from a dataframe
+#Inspired by https://gist.github.com/mrdwab/6424112
+
+stratified <- function(df, split.var, size) {
+  #Split the dataset based on a variable - this will be the challenge day
+  df.split <- split(df, df[, split.var])
+  #In order to randomly select 10% of the dataset, there needs to be 1-2 obs. per challenge day
+  #Create random binomial with p=0.6 - the position within the vector corresponds to the challenge day
+  #A 1 means that 2 observations will be selected from that day
+  #A 0 means that 1 observation will be selected from that day
+  rand <- rbinom(length(df.split), 1, 0.6)
+  out <- NULL
+  for (i in 1:length(df.split)) {
+    #For each challenge day, randomly sample the observations and select either 1 or 2 subjects - 
+    #This is based on random binomial above
+    new <- df.split[[i]][sample(nrow(df.split[[i]]), size=ifelse(rand[i] == 1, yes = ceiling(size*nrow(df.split[[i]])), no = floor(size*nrow(df.split[[i]])))), ]
+    #Append to dataframe to contain random sample from all challenge days
+    out <- rbind(out, new)
+  }
+  return(out)
+}
+
+
+rsquared <- function(y,yhat,p,n){
+  rsq <- 1 - (sum((y-yhat)^2)/sum((y-mean(y))^2))
+  1-(((1-rsq)*(n-1))/(n-p-1))
+}
+
+
+boot.segmented.numeric <- function(df, i) {
+  #Select bootstrap sample with replacement
+  x <- unique(df$logX[!is.na(df$logX)])
+  df2 <- df[i, ]
+  mod <- tryCatch(segmented(lm(logY~logX, data=df2), seg.Z=~logX, npsi=2, control = seg.control(seed=NULL, n.boot = 50)), error=function(e) NA)
+  preds <- tryCatch((predict(mod, newdata = data.frame(logX=x), level=0.95)), error=function(e) rep(NA, length(x)))
+  return(c(preds))
+}
+
+
+#Function to perform repeated cross validation
+#Approximately 10% of the data is randomly left out of the model each time and used for testing
+#Repeat 100 times
+
+repeatedcv_numeric <- function(logX, logY, split.var, split.dat, group=D$Subgroup, size=0.1, repeats=100) {
+  #Create matrix to store results from repeats
+  dat <- data.frame(logX = logX, logY = logY, split.dat=split.dat, group=group)
+  names(dat)[3] <- split.var
+  results2 <- data.frame(matrix(NA, nrow=repeats, ncol=5))
+  j <- 1
+  #Loop through for number of repeats
+  while(j <= repeats) {
+    #Randomly select test set using stratified function above
+    #This function will select 1-2 observations from each challenge day
+    strat.samp <- stratified(dat, split.var, size)
+    
+    #Ensure that the randomly selected test set doesn't contain 2 or more placebos (5G) from the same challenge day
+    #If it does not, continue with the analysis
+    if (sum(as.numeric(as.data.frame(strat.samp %>% group_by(`Challenge Day`, group) %>% summarize(n=n(), .groups="drop") %>% filter(group == "5A"))$n >= 2)) == 0) {
+      #Split into training and test sets
+      testIndexes <- row.names(strat.samp)
+      testData <- dat[testIndexes, ]
+      trainData <- dat[-as.numeric(testIndexes), ]
+      #Set models on training data - linear, exponential, segmented, natural cubic splines
+      mod.lm <- tryCatch(lm(logY~logX, data=trainData), error=function(e) NA)
+      mod.exp <- tryCatch(nls(logY ~ I(a*exp(b*logX)), data = trainData, start = list(a = 1, b = 1)), error=function(e) NA)
+      
+      #Segmented will sometimes throw an error: "Error in lm.fit(x, y, offset = offset, singular.ok = singular.ok, ...) :
+      #0 (non-NA) cases" - use try/catch loop so that if the error is given, the model returns NA instead of stopping 
+      #the whole for loop. Increasing n.boot to 50 helps with this problem
+      
+      #Segmented sometimes can not estimate a breakpoint - this is a warning and the model will continue 
+      #with the same output as lm
+      
+      #Set seed to be NULL so that a random seed is used - otherwise for some reason this sets the seed for the 
+      #stratified function and the same test set is selected multiple times
+      
+      mod.seg <- tryCatch(segmented(mod.lm, seg.Z=~logX, npsi=2, control = seg.control(seed=NULL, n.boot = 50, display=FALSE)), error=function(e) NA)
+      
+      mod.5 <- tryCatch(lm(logY~ns(logX, 5), data=trainData), error=function(e) NA)
+      
+      mod.4pl <- tryCatch(drm(logY~logX, fct=L.4(names=c("Slope", "Lower", "Upper", "Mid")),data=trainData, control=drmc(method="BFGS")), error=function(e) NA)
+      #Get predicted data using test data and calculate R^2
+      #If model not produced from segmented due to error described above - return NA
+      predicted.lm <- tryCatch(as.data.frame(predict(mod.lm, newdata = testData)), error=function(e) NA)
+      
+      predicted.exp <- tryCatch(as.data.frame(predict(mod.exp, newdata = testData)), error=function(e) NA)
+      library(segmented)
+      predicted.seg <- tryCatch(as.data.frame(predict(mod.seg, newdata = testData)), error=function(e) NA)
+
+      #Warning from models with splines: "prediction from a rank-deficient fit may be misleading"
+      predicted.5 <- tryCatch(as.data.frame(predict(mod.5, newdata = testData)), error=function(e) NA)
+
+      predicted.4pl <- tryCatch(as.data.frame(predict(mod.4pl, newdata=testData)), error=function(e) NA)
+
+      n <- nrow(testData)
+      results2[j, 1] <- tryCatch(rsquared(testData$logY, predicted.lm, mod.lm$rank, n), error=function(e) NA)
+      results2[j, 2] <- tryCatch(rsquared(testData$logY, predicted.exp, 2, n), error=function(e) NA)
+      results2[j, 3] <- tryCatch(rsquared(testData$logY, predicted.seg, mod.seg$rank, n), error=function(e) NA)
+      results2[j, 4] <- tryCatch(rsquared(testData$logY, predicted.5, mod.5$rank, n), error=function(e) NA)
+      results2[j, 5] <- tryCatch(rsquared(testData$logY, predicted.4pl, 4, n), error=function(e) NA)
+      
+      
+      j <- j+1
+      #If 2 placebos selected from same challenge day - repeat that iteration of the loop and randomly 
+      #select a different test set
+    } else {
+      j <- j-1
+    }
+    
+  }
+  results2$select <- 0
+  for (i in 1:nrow(results2)) {
+    if (sum(is.na(results2[i, c(1:5)])) != 5) {
+      results2[i, ]$select <- which.max(results2[i, c(1:5)])
+    } else {
+      results2[i, ]$select <- NA
+    }
+    
+  }
+ 
+  results2$select <- factor(results2$select, levels = seq(1:5), labels = c("lm", "exp", "seg", "ns5", "4pl"))
+  
+  select2 <- table(results2$select)
+  return(select2)
+  
+}
+
+
+
+#A function to calculate the confidence intervals on the predicted values
+#Takes as input the X values on the log scale, the outcome Y values on the log scale, 
+#and the output from the repeatedcv_numeric() function - a table
+predicted_values_numeric <- function(logX, logY, cv_results) {
+  best.fit <- which.max(cv_results)
+  if (best.fit == 1) {
+    mod <- lm(logY~logX)
+    predictions <- as.data.frame(predict(mod, newdata = data.frame(logX=unique(logX[!is.na(logX)])), level=0.95, interval="confidence"))
+    predictions$x <- unique(logX[!is.na(logX)])
+  }
+  if (best.fit == 2) {
+    mod <- nls(logY ~ I(a*exp(b*logX)), start = list(a = 1, b = 1))
+    predictions <- as.data.frame(predFit(mod, newdata=data.frame(logX=unique(logX[!is.na(logX)])), level=0.95, interval = "confidence"))
+    predictions$x <- unique(logX[!is.na(logX)])
+  }
+  if (best.fit == 3) {
+    save <- boot(data.frame(logX=logX, logY=logY), boot.segmented.numeric, R=1000)
+    boot_samp <- save$t
+    lower <- apply(boot_samp, 2, quantile, 0.025, na.rm=T)
+    upper <- apply(boot_samp, 2, quantile, 0.975, na.rm=T)
+    mod <- tryCatch(segmented(lm(logY~logX), seg.Z=~logX, npsi=2, control = seg.control(seed=NULL, n.boot = 50)), error=function(e) NA)
+    fit <- tryCatch(as.data.frame(predict(mod, newdata = data.frame(logX=unique(logX[!is.na(logX)]))))[ ,1], error=function(e) rep(NA, length(unique(logX[!is.na(logX)]))))
+    predictions <- tryCatch(data.frame(fit = fit, lwr = lower, upr = upper), error=function(e) NA)
+    predictions$x <- tryCatch(unique(logX[!is.na(logX)]), error=function(e) NA)
+    
+  }
+  if (best.fit == 4) {
+    mod <- lm(logY~ns(logX, 5))
+    predictions <- as.data.frame(predict(mod, newdata = data.frame(logX=unique(logX[!is.na(logX)])), level=0.95, interval="confidence"))
+    predictions$x <- unique(logX[!is.na(logX)])
+  }
+  if (best.fit == 5) {
+    mod <- tryCatch(drm(logY~logX, fct=L.4(names=c("Slope", "Lower", "Upper", "Mid")), control=drmc(method="BFGS")), error=function(e) NA)
+    predictions <- tryCatch(as.data.frame(predict(mod, newdata = data.frame(logX=unique(logX[!is.na(logX)])), level=0.95, interval="confidence")), error=function(e) NA)
+    predictions$x <- tryCatch(unique(logX[!is.na(logX)]), error=function(e) NA)
+  }
+  names(predictions)[c(1:3)] <- c("fit", "lwr", "upr")
+  return(predictions)
+}
+
+
+quiet <- function(x) { 
+  sink(tempfile()) 
+  on.exit(sink()) 
+  invisible(force(x)) 
+} 
+
+
+cod<-function(mod,adjust=TRUE, data){
+  yhat<-predict(mod,type="response", newdata=data[!is.na(data$logY), ])
+  y<-data$logY[!is.na(data$logY)]
+  
+  if (length(yhat[y==0]) > 0 & length(yhat[y==1]) > 0) {
+    CoD<-c(CoefDiscr=mean(yhat[y==1], na.rm=T) -mean(yhat[y==0], na.rm=T))
+  } else if (length(yhat[y==0]) > 0 & length(yhat[y==1]) == 0) {
+    CoD<-c(CoefDiscr=mean(yhat[y==0], na.rm=T))
+  } else if (length(yhat[y==0]) == 0 & length(yhat[y==1]) > 0) {
+    CoD<-c(CoefDiscr=mean(yhat[y==1], na.rm=T))
+  }
+  
+  if (adjust){
+    CoD<- 1- (mod$df.null/mod$df.residual)*(1-CoD)
+  }
+  if (is.nan(CoD)) {
+    CoD <- NA
+  }
+  CoD
+}
+
+
+boot.segmented.binary <- function(df, i) {
+  #Select bootstrap sample with replacement
+  #browser()
+  x <- unique(df$logX[!is.na(df$logX)])
+  df2 <- df[i, ]
+  mod <- tryCatch(segmented(glm(binY~logX, data=df2, family="binomial"), seg.Z=~logX, npsi=2, control = seg.control(seed=NULL, n.boot = 50)), error=function(e) NA)
+  preds <- tryCatch((predict(mod, newdata = data.frame(logX=x), level=0.95)), error=function(e) rep(NA, length(x)))
+  preds2 <- tryCatch(mod$family$linkinv(preds), error=function(e) rep(NA, length(x)))
+  return(c(preds2))
+}
+
+
+repeatedcv_binary <- function(logX, binY, split.var="Challenge Day", split.dat=D$`Challenge Day`, group=D$Subgroup, size=0.1, repeats=1000) {
+  #Create matrix to store results from repeats
+  dat <- data.frame(logX = logX, logY = binY, split.dat=split.dat, group=group)
+  names(dat)[3] <- split.var
+  results2 <- data.frame(matrix(NA, nrow=repeats, ncol=3))
+  j <- 1
+  #Loop through for number of repeats
+  while(j <= repeats) {
+    #Randomly select test set using stratified function above
+    #This function will select 1-2 observations from each challenge day
+    strat.samp <- stratified(dat, split.var, size)
+    
+    #Ensure that the randomly selected test set doesn't contain 2 or more placebos (5G) from the same challenge day
+    #If it does not, continue with the analysis
+    if (sum(as.numeric(as.data.frame(strat.samp %>% group_by(`Challenge Day`, group) %>% summarize(n=n(), .groups="drop") %>% filter(group == "5A"))$n >= 2)) == 0) {
+      #Split into training and test sets
+      testIndexes <- row.names(strat.samp)
+      testData <- dat[testIndexes, ]
+      trainData <- dat[-as.numeric(testIndexes), ]
+      #Set models on training data - linear, segmented, natural cubic splines
+      mod.glm <- tryCatch(glm(logY~logX, data=trainData, family = "binomial"), error=function(e) NA)
+      #Segmented will sometimes throw an error: "Error in lm.fit(x, y, offset = offset, singular.ok = singular.ok, ...) :
+      #0 (non-NA) cases" - use try/catch loop so that if the error is given, the model returns NA instead of stopping 
+      #the whole for loop. Increasing n.boot to 50 helps with this problem
+      
+      #Segmented sometimes can not estimate a breakpoint - this is a warning and the model will continue 
+      #with the same output as lm
+      
+      #Set seed to be NULL so that a random seed is used - otherwise for some reason this sets the seed for the 
+      #stratified function and the same test set is selected multiple times
+      
+      mod.seg <- tryCatch(segmented(mod.glm, seg.Z=~logX, npsi=2, control = seg.control(seed=NULL, n.boot = 50, display=FALSE)), error=function(e) NA)
+      
+      mod.5 <- tryCatch(glm(logY~ns(logX, 5), data=trainData, family="binomial"), error=function(e) NA)
+      #Get predicted data using test data and calculate R^2
+      #If model not produced from segmented due to error described above - return NA
+ 
+      results2[j, 1] <- tryCatch(cod(mod.glm, data=testData), error=function(e) NA)
+      results2[j, 2] <- tryCatch(cod(mod.seg, data=testData), error=function(e) NA)
+      results2[j, 3] <- tryCatch(cod(mod.5, data=testData), error=function(e) NA)
+      
+      j <- j+1
+
+      #If 2 placebos selected from same challenge day - repeat that iteration of the loop and randomly 
+      #select a different test set
+    } else {
+      j <- j-1
+    }
+    
+  }
+
+  results2$select <- 0
+  for (i in 1:nrow(results2)) {
+    if (sum(is.na(results2[i, c(1:3)])) != 3) {
+      results2[i, ]$select <- which.max(results2[i, c(1:3)])
+  } else {
+      results2[i, ]$select <- NA
+  }
+    
+  }
+ 
+  results2$select <- factor(results2$select, levels = seq(1:3), labels = c("log", "seg", "ns5"))
+  
+  select2 <- table(results2$select)
+  #Get table of which model was selected for each of the repeats of the CV
+  return(select2)
+  
+}
+
+#A function to calculate the confidence intervals on the predicted values
+#Takes as input the X values on the log scale, the outcome binary Y values, 
+#and the output from the repeatedcv_binary() function - a table
+predicted_values_binary <- function(logX, binY, cv_results) {
+  best.fit <- which.max(cv_results)
+  if (best.fit == 1) {
+    mod <- glm(binY~logX, family="binomial")
+    t <- qt(0.025, mod$df.residual, lower.tail = F)
+    preds <- as.data.frame(predict(mod, newdata = data.frame(logX=unique(logX[!is.na(logX)])), level=0.95, interval="confidence", type="link", se.fit = T))
+    upr <- preds$fit + (t * preds$se.fit)
+    lwr <- preds$fit - (t * preds$se.fit)
+    fit <- preds$fit
+    predictions <- data.frame(fit = mod$family$linkinv(fit), lwr = mod$family$linkinv(lwr), upr = mod$family$linkinv(upr))
+    predictions$x <- unique(logX[!is.na(logX)])
+  }
+  if (best.fit == 2) {
+    set.seed(12345)
+    mod <- tryCatch(segmented(glm(binY~logX, family="binomial"), seg.Z=~logX, npsi=2, control = seg.control(seed=NULL, n.boot = 50)), error=function(e) NA)
+    save <- boot(data.frame(logX=logX, binY=binY), boot.segmented.binary, R=1000)
+    boot_samp <- save$t
+    lower <- apply(boot_samp, 2, quantile, 0.025, na.rm=T)
+    upper <- apply(boot_samp, 2, quantile, 0.975, na.rm=T)
+    fit <- tryCatch(as.data.frame(predict(mod, newdata = data.frame(logX=unique(logX[!is.na(logX)]))))[ ,1], error=function(e) rep(NA, length(unique(logX[!is.na(logX)]))))
+    predictions <- tryCatch(data.frame(fit = mod$family$linkinv(fit), lwr = lower, upr = upper), error=function(e) NA)
+    predictions$x <- tryCatch(unique(logX[!is.na(logX)]), error=function(e) NA)
+  }
+  if (best.fit == 3) {
+    mod <- glm(binY~ns(logX, 5), family="binomial")
+    t <- qt(0.025, mod$df.residual, lower.tail = F)
+    preds <- as.data.frame(predict(mod, newdata = data.frame(logX=unique(logX[!is.na(logX)])), level=0.95, interval="confidence", type="link", se.fit = T))
+    upr <- preds$fit + (t * preds$se.fit)
+    lwr <- preds$fit - (t * preds$se.fit)
+    fit <- preds$fit
+    predictions <- data.frame(fit = mod$family$linkinv(fit), lwr = mod$family$linkinv(lwr), upr = mod$family$linkinv(upr))
+    predictions$x <- unique(logX[!is.na(logX)])
+  }
+  #names(predictions)[c(1:3)] <- c("fit", "lwr", "upr")
+  return(predictions)
+}
+```
+
+```{r, echo = FALSE}
+D <- as.data.frame(readxl::read_xlsx("./data/allDat.xlsx"))
+D$manuf <- factor(D$`Vaccine Candidate`, levels = c("Janssen Single Dose", "Janssen Two Dose", "Moderna", "Novavax", "Sanofi", "Placebo"), labels = c("Janssen", "Janssen", "Moderna", "Novavax", "Sanofi", "Placebo"))
+D$`Challenge Day` <- factor(D$`Challenge Day`)
+```
+
+
+
+
+```{r, echo = FALSE}
+cont.outcomes.log <- grep("log_VL|AUC", names(D))
+cont.outcomes.reg <- grep("VL Day 2|AUC", names(D))
+bin.outcomes <- grep("bin", names(D))
+
+immune.markers.log <- grep("log_MN|log_PsVNA|log_MSD", names(D))
+immune.markers.reg <- grep("(?<!log_)MN|(?<!log_)PsVNA|(?<!log_)MSD", names(D), perl=T)
+```
+
+\setcounter{table}{0}
+\renewcommand{\thetable}{6.4.\arabic{table}}
+
+
+# 6.4 Prediction of Post-Challenge Viral Load with Single Virus-Specific Antibody
+
+The first step is to predict a post-challenge viral load (chosen from Section 3.3) using a virus-specific antibody (from Section 3.2). Different models are used depending on whether the post-challenge viral load is binary or numeric. 
+
+## 6.4.1 Numeric Viral Load
+
+For numeric viral load, several models will be fit using the log of the response value. Let $y_{jk}$ and $x_{jk}$ be the outcome (e.g., log of the viral load) and the virus-specific antibody, respectively,  for the $k^{th}$ animal in the $j^{th}$ arm.  Let  $\mu_{jk}$  be the mean response associated with $y_{jk}$.  For this model, the vaccine arm is not modeled, so that two animals from different vaccine arms with the same value of virus-specific antibody will have the same predicted response.  Several different models will be fit to the data, and best model will be selected by repeated cross validation with 500 replicates, where a certain proportion of the animals (e.g., 10%) are randomly left out of the model building and those left-out animals will be used to compare the fits of different models by adjusted R-squared. The animals selected for the test set will be stratified by challenge day; 1-2 animals will be selected per challenge day with the added constraint that both animals selected from a given day will not both be placebo.  
+
+The simplest model tried will be the linear model: $\mu_{jk} = \beta_0 + \beta_1 x_{jk}$. Another model is an exponential model (see e.g., McMahan, et al, 2020, Fig. 2). A third set of models are segmented regression models, with 2 breakpoints, using the segmented  R package (Muggeo, 2020).  A fourth set of models are fit with natural cubic splines with 5 degrees of freedom, using the default knots in the ns function in the spline R package. Finally, a four parameter logistic (4-PL) model may also be evaluated using the drm function in the drc R package (Ritz et al., 2015): $\mu_{jk} = B + ((A-B)/(1+(x_{jk}/C)^D))$, where the 4-PL parameters are: A = lower asymptote, B = upper asymptote, C = midpoint, D = slope parameter. That model will be fit by least squares and the BFGS optimization method.
+
+$f(x) = c + \frac{d-c}{1+\exp(b(\log(x)-\log(e)))}$
+
+
+
+If the cross-validation produces a model with substantial non-monotonicity, we may remove that model type from consideration and repeat the CV without that model. This process may be repeated if necessary. 
+
+
+
+Once the model is selected by cross validation, the selected model will be fit to all of the data. If the selected model is not segmented regression, pointwise confidence intervals on the predicted values will be calculated using the parametric formula: $\hat{y}_{jk} \pm t_{\alpha/2,df} SE$, where $\hat{y}_{jk}$ = the estimated predicted value for the $k^th$ animal in the $j^th$ arm, SE = the standard error for the estimate of the predicted value, and $t_{\alpha/2,df}$ = critical value from the t distribution corresponding to $\alpha/2$ and n-p degrees of freedom (p includes the intercept, where applicable). This is analogous to the built-in predict functions in R. If the segmented regression model is selected by the cross-validation procedure, pointwise confidence intervals on the predicted values will be calculated by nonparametric bootstrap. 
+
+
+
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=T}
+combs <- expand.grid(immune.markers.log, cont.outcomes.log)
+
+cv.outcomes <- matrix(NA, nrow = nrow(combs), ncol = 5)
+
+for (i in 1:nrow(combs)) {
+  cv.outcomes[i, ] <- quiet(repeatedcv_numeric(logX = D[ ,combs[i, 1]], logY=D[ ,combs[i, 2]], split.var="Challenge Day", split.dat=D$`Challenge Day`, group=D$Subgroup, size=0.1, repeats=500))
+}
+
+cv.outcomes <- as.data.frame(cv.outcomes)
+
+cv.outcomes$immune <- gsub("_", " ", names(D)[combs[ ,1]])
+cv.outcomes$immune <- gsub(".", " ", cv.outcomes$immune, fixed=T)
+
+cv.outcomes$outcome <- gsub("_", " ", names(D)[combs[ ,2]])
+cv.outcomes$outcome <- gsub(".", " ", cv.outcomes$outcome, fixed=T)
+
+cv.outcomes$best.fit <- 0
+for (i in 1:nrow(cv.outcomes)) {
+  cv.outcomes[i, ]$best.fit <- which.max(cv.outcomes[i, c(1:5)])
+}
+
+cv.outcomes$best.fit <- factor(cv.outcomes$best.fit, levels = seq(1:5), labels = c("lm", "exp", "seg", "ns5", "4pl"))
+
+write_xlsx(cv.outcomes[ ,c(6:8)], "C:/Users/matejaam/Desktop/cv_outcomes.xlsx")
+```
+
+```{r, echo = FALSE, warning=F, message=F}
+cv.outcomes.new <- cv.outcomes[ ,c(6:8)]
+
+
+cv.outcomes.new$rsq <- 0
+cv.outcomes.new$fig.num <- NA
+
+for (i in 1:nrow(combs)) {
+  
+  df <- data.frame(x = D[ ,combs[i, 1]], y=D[ ,combs[i, 2]])
+  df <- df[complete.cases(df), ]
+  
+  if (cv.outcomes.new[i, "best.fit"] == "lm") {
+    mod <- lm(y~x, data=df)
+    cv.outcomes.new[i, "rsq"] <- round(rsquared(y=df$y, yhat=predict(mod), p=mod$rank, n=nrow(df)), 3)
+  } else if (cv.outcomes.new[i, "best.fit"] == "exp") {
+    mod <- nls(y ~ I(a*exp(b*x)), data=df, start = list(a = 1, b = 1))
+    cv.outcomes.new[i, "rsq"] <- round(rsquared(y=df$y, yhat=predict(mod), p=2, n=nrow(df)), 3)
+  }
+  
+  cv.outcomes.new[i, "fig.num"] <- paste0("6.4.", i)
+  
+}
+
+cv.outcomes.new <- cv.outcomes.new %>% arrange(desc(rsq))
+
+kable(cv.outcomes.new, row.names = FALSE, caption = "Model Selection Results Using Single Virus-Specific Antibody to Predict Post Challenge Viral Load - Numeric", align = "c", escape = F, col.names = c("Virus-Specific Antibody", "Viral Load", "Model Selected", "Adjusted Rsq", "Figure Number"), longtable=T) %>% kable_styling(latex_options=c(position = "HOLD_position", "repeat_header")) %>% column_spec(c(1:5), width = "8em")
+```
+
+There are `r sum(cv.outcomes$best.fit == "lm")` pairs of virus-specific antibodies/viral loads (out of `r nrow(cv.outcomes)` total pairs) where the best model fit is linear; `r sum(cv.outcomes$best.fit == "exp")` where the best model fit is exponential; `r sum(cv.outcomes$best.fit == "seg")` where the best model fit is segmented linear (with 2 breakpoints); `r sum(cv.outcomes$best.fit == "ns5")` where the best model fit is natural cubic splines with 5 degrees of freedom; and `r sum(cv.outcomes$best.fit == "4pl")` where the best model fit is 4-parameter logistic. 
+
+### Predicted Values
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE, fig.height=4}
+all.predictions.numeric <- vector(mode = "list", length = nrow(combs))
+
+
+for (i in 1:nrow(combs)) {
+  predicted.val <- predicted_values_numeric(logX = D[ ,combs[i, 1]], logY=D[ ,combs[i, 2]], cv_results = cv.outcomes[i, c(1:5)])
+  logX <- D[ ,combs[i, 1]]
+  logY <- D[ ,combs[i, 2]]
+  best.fit <- which.max(cv.outcomes[i, c(1:5)])
+  if (best.fit == 1) {
+    mod <- lm(logY~logX)
+    est <- coef(mod)[2]
+    lower <- confint(mod)[2, 1]
+    upper <- confint(mod)[2,2]
+    p_val <- coefficients(summary(mod))[2, 4]
+    p_val <- ifelse(p_val < 0.001, "<0.001", paste0("=",round(p_val, 3)))
+  }  
+  if (best.fit == 2) {
+    mod <- nls(logY ~ I(a*exp(b*logX)), start = list(a = 1, b = 1))
+    est <- exp(coef(mod)[2])
+    lower <- exp(confint(mod)[2, 1])
+    upper <- exp(confint(mod)[2,2])
+    p_val <- coefficients(summary(mod))[2, 4]
+    p_val <- ifelse(p_val < 0.001, "<0.001", paste0("=",round(p_val, 3)))
+  }
+  all.predictions.numeric[[i]] <- predicted.val
+  p <- ggplot(predicted.val, aes(x = x, y=fit)) +geom_line() + geom_point(data=data.frame(logX = D[ ,combs[i, 1]], logY=D[ ,combs[i, 2]]), aes(x=logX, y=logY), col="grey") + geom_line(aes(x=x, y=upr)) + geom_line(aes(x=x, y=lwr)) + theme_bw()+ ylab(cv.outcomes[i, ]$outcome) + xlab(cv.outcomes[i, ]$immune) + ggtitle(cv.outcomes[i, ]$best.fit, subtitle = paste0("Est. = ", round(est, 2), " (", round(lower, 2), ", ", round(upper, 2), "), p", p_val)) + geom_ribbon(aes(ymin=lwr, ymax=upr, x=x), alpha=0.15)
+  p <- annotate_figure(p, fig.lab = paste0("Figure 6.4.", i), fig.lab.pos = "bottom.right")
+  print(p)
+  writeLines("\n")
+}
+
+```
+
+
+
+\newpage
+
+
+## 6.4.2 Binary Viral Load
+
+For binary viral load, a logistic model is fit with an intercept and one main effect for virus-specific antibody. The notation is the same as in Section 6.4.1, except now $y_{jk}$ represents a binary response. As in the previous section, several models will be tried and the best one selected by cross-validation. Instead of comparing the models using adjusted R-squared, we use the binary analog, the adjusted coefficient of discrimination (Tjur, 2009, Fay et al., 2012). The models tried are the following: the logistic model:
+
+$log_e\{\mu_{jk} /(1-\mu_{jk} )\} = \beta_0 + \beta_1 x_{jk}$
+
+Analogously to Section 6.4.1, the linear predictor portion of the model may be modeled in different ways: it could be fit as a segmented line with 2 breakpoints, or  fit with natural cubic splines with 5 degrees of freedom. As in section 6.4.1, the best model by cross-validation will be fit to all of the data (enforcing monotonicity if needed), with confidence intervals on the prediction calculated using the parametric formula as above or nonparametric bootstrap (for segmented regression). 
+
+
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=T}
+combs.bin <- expand.grid(immune.markers.log, bin.outcomes)
+
+cv.outcomes.bin <- matrix(NA, nrow = nrow(combs.bin), ncol = 3)
+
+for (i in 1:nrow(combs.bin)) {
+  cv.outcomes.bin[i, ] <- quiet(repeatedcv_binary(logX = D[ ,combs.bin[i, 1]], binY=D[ ,combs.bin[i, 2]], split.var="Challenge Day", split.dat=D$`Challenge Day`, group=D$Subgroup, size=0.1, repeats=500))
+  
+}
+
+cv.outcomes.bin <- as.data.frame(cv.outcomes.bin)
+
+cv.outcomes.bin$immune <- gsub("_", " ", names(D)[combs.bin[ ,1]])
+cv.outcomes.bin$immune <- gsub(".", " ", cv.outcomes.bin$immune, fixed=T)
+
+cv.outcomes.bin$outcome <- gsub("_", " ", names(D)[combs.bin[ ,2]])
+cv.outcomes.bin$outcome <- gsub(".", " ", cv.outcomes.bin$outcome, fixed=T)
+
+cv.outcomes.bin$best.fit <- 0
+for (i in 1:nrow(cv.outcomes.bin)) {
+  cv.outcomes.bin[i, ]$best.fit <- which.max(cv.outcomes.bin[i, c(1:3)])
+}
+
+cv.outcomes.bin$best.fit <- factor(cv.outcomes.bin$best.fit, levels = seq(1:3), labels = c("log", "seg", "ns5"))
+
+write_xlsx(cv.outcomes.bin, "C:/Users/matejaam/Desktop/cv_outcomes_bin.xlsx")
+
+```
+  
+
+```{r, echo = FALSE, warning=F, message=F}
+cv.outcomes.bin.new <- cv.outcomes.bin[ ,c(4:6)]
+
+
+cv.outcomes.bin.new$rsq <- 0
+cv.outcomes.bin.new$fig.num <- NA
+cv.outcomes.bin.new$rsq.log <- 0
+
+for (i in 1:nrow(combs.bin)) {
+  
+  df <- data.frame(logX = D[ ,combs.bin[i, 1]], logY=D[ ,combs.bin[i, 2]])
+  df <- df[complete.cases(df), ]
+  
+  mod.log <- glm(logY~logX, data=df, family="binomial")
+  cv.outcomes.bin.new[i, "rsq.log"] <- round(cod(mod=mod.log, data=df), 3)
+  
+  if (cv.outcomes.bin.new[i, "best.fit"] == "log") {
+    mod <- glm(logY~logX, data=df, family="binomial")
+    cv.outcomes.bin.new[i, "rsq"] <- round(cod(mod=mod, data=df), 3)
+  } else if (cv.outcomes.bin.new[i, "best.fit"] == "ns5") {
+    mod <- glm(logY~ns(logX, 5), data=df, family="binomial")
+    cv.outcomes.bin.new[i, "rsq"] <- round(cod(mod=mod, data=df), 3)
+  } else if (cv.outcomes.bin.new[i, "best.fit"] == "seg") {
+    set.seed(12345)
+    mod <- tryCatch(segmented(glm(logY~logX, data=df, family="binomial"), seg.Z=~logX, npsi=2, control = seg.control(seed=NULL, n.boot = 50)), error=function(e) NA)
+    cv.outcomes.bin.new[i, "rsq"] <- round(cod(mod=mod, data=df), 3)
+  } 
+  
+  cv.outcomes.bin.new[i, "fig.num"] <- paste0("6.4.", i+nrow(combs))
+  
+}
+
+cv.outcomes.bin.new <- cv.outcomes.bin.new %>% arrange(desc(rsq))
+
+kable(cv.outcomes.bin.new[ ,c(1:5)], row.names = FALSE, caption = "Model Selection Results Using Single Virus-Specific Antibody to Predict Post Challenge Viral Load - Binary", align = "c", escape = F, col.names = c("Virus-Specific Antibody", "Binary Viral Load", "Model Selected", "Adjusted CoD", "Figure Number"), longtable=T) %>% kable_styling(latex_options=c(position = "HOLD_position", "repeat_header")) %>% column_spec(c(1:5), width = "8em")
+
+```
+
+There are `r sum(cv.outcomes.bin$best.fit == "log")` pairs of virus-specific antibodies/viral loads (out of `r nrow(cv.outcomes.bin)` total pairs) where the best model fit is logistic; `r sum(cv.outcomes.bin$best.fit == "seg")` where the best model fit is segmented (with 2 breakpoints); and `r sum(cv.outcomes.bin$best.fit == "ns5")` where the best model fit is natural cubic splines with 5 degrees of freedom. 
+
+### Predicted Values
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE, fig.height=4}
+all.predictions.binary <- vector(mode = "list", length = nrow(combs.bin))
+
+
+for (i in 1:nrow(combs.bin)) {
+  predicted.val <- quiet(predicted_values_binary(logX = D[ ,combs.bin[i, 1]], binY=D[ ,combs.bin[i, 2]], cv_results = cv.outcomes.bin[i, c(1:3)]))
+  all.predictions.binary[[i]] <- predicted.val
+  set.seed(12345)
+  p<-ggplot(predicted.val, aes(x = x, y=fit)) + geom_line() + geom_jitter(data=data.frame(logX = D[ ,combs.bin[i, 1]], binY=D[ ,combs.bin[i, 2]]), aes(x=logX, y=binY), col="grey", height=0.05, width=0) + geom_line(aes(x=x, y=upr)) + geom_line(aes(x=x, y=lwr)) + theme_bw()+ ylab(cv.outcomes.bin[i, ]$outcome) + xlab(cv.outcomes.bin[i, ]$immune) + ggtitle(cv.outcomes.bin[i, ]$best.fit) + geom_ribbon(aes(ymin=lwr, ymax=upr, x=x), alpha=0.15)
+  p <- annotate_figure(p, fig.lab = paste0("Figure 6.4.", i+nrow(combs)), fig.lab.pos = "bottom.right")
+  print(p)
+  writeLines("\n")
+  
+  if (which.max(cv.outcomes.bin[i, c(1:3)]) != 1) {
+    dat <- data.frame(logX = D[ ,combs.bin[i, 1]], logY = D[ ,combs.bin[i, 2]])
+    mod <- glm(logY~logX, data=dat, family="binomial")
+    t <- qt(0.025, mod$df.residual, lower.tail = F)
+    preds <- as.data.frame(predict(mod, newdata = data.frame(logX=unique(D[ ,combs.bin[i, 1]][!is.na(D[ ,combs.bin[i, 1]])])), level=0.95, interval="confidence", type="link", se.fit = T))
+    upr <- preds$fit + (t * preds$se.fit)
+    lwr <- preds$fit - (t * preds$se.fit)
+    fit <- preds$fit
+    predictions <- data.frame(fit = mod$family$linkinv(fit), lwr = mod$family$linkinv(lwr), upr = mod$family$linkinv(upr))
+    predictions$x <- unique(D[ ,combs.bin[i, 1]][!is.na(D[ ,combs.bin[i, 1]])])
+    set.seed(12345)
+    p<-ggplot(predictions, aes(x = x, y=fit)) + geom_line() + geom_jitter(data=data.frame(logX = D[ ,combs.bin[i, 1]], binY=D[ ,combs.bin[i, 2]]), aes(x=logX, y=binY), col="grey", height=0.05, width=0) + geom_line(aes(x=x, y=upr)) + geom_line(aes(x=x, y=lwr)) + theme_bw()+ ylab(cv.outcomes.bin[i, ]$outcome) + xlab(cv.outcomes.bin[i, ]$immune) + ggtitle("Logistic regression to address non-monotonicity") + geom_ribbon(aes(ymin=lwr, ymax=upr, x=x), alpha=0.15)
+  p <- annotate_figure(p, fig.lab = paste0("Figure 6.4.", i+nrow(combs), ".1"), fig.lab.pos = "bottom.right")
+  print(p)
+  writeLines("\n")
+    
+  }
+
+}
+
+```
+
+
+
+
+
+
+

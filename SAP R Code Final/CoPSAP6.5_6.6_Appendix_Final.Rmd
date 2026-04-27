@@ -1,0 +1,808 @@
+---
+title: "CoP SAP 6.5 and 6.6 Appendix"
+author: "Allyson Mateja"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+library(kableExtra)
+library(ggplot2)
+library(RColorBrewer)
+library(boot)
+library(dplyr)
+library(readxl)
+library(saws)
+```
+
+
+```{r, echo = FALSE}
+#Functions 
+
+
+#Function to calculate adjusted R2
+#Input y values, predicted y values, and number of parameters (including intercept) in the model
+adj_rsquared <- function(y, yhat, p){
+  #Caculate r squared using normal formula
+  r_sq <- 1 - (sum((y-yhat)^2)/sum((y-mean(y))^2))
+  n <- length(y) #Get sample size
+  #Adjust R squared by sample size and number of model parameters
+  adj_r_sq <- 1-(((n-1)*(1-r_sq))/(n-p))
+  return(adj_r_sq)
+}
+
+#Function to calculate adjusted coefficient of discrimination
+#Input y values, predicted y values, and number of parameters (including intercept) in the model
+adj_cod <- function(y, yhat, p) {
+  #Calculate CoD using normal formula
+  if (length(yhat[y==0]) > 0 & length(yhat[y==1]) > 0) {
+    cod<-mean(yhat[y==1], na.rm=T) -mean(yhat[y==0], na.rm=T)
+  } else if (length(yhat[y==0]) > 0 & length(yhat[y==1]) == 0) {
+    cod<-mean(yhat[y==0], na.rm=T)
+  } else if (length(yhat[y==0]) == 0 & length(yhat[y==1]) > 0) {
+    cod<-mean(yhat[y==1], na.rm=T)
+  }
+  
+  n <- length(y)
+  #Adjust CoD by sample size and number of model parameters
+  adj_cod <- 1-(((n-1)*(1-cod))/(n-p))
+  return(adj_cod)
+}
+
+#NOTE: Treating dose score as continuous
+#We may need to adjust the dose score value, and calibrate it to the Beta values from 6.3.1
+#This may need to change
+
+###6.5
+
+#Function for bootstrap of PVE for continuous outcome
+boot.pve_base_dose_adj_r_sq_lm <- function(df, i) {
+  #Select bootstrap sample with replacement
+  df2 <- df[i, ]
+  #Get PVE for bootstrap sample
+  
+  base_mod <- lm(logY ~ logX, data=df2)
+  base_r_sq <- adj_rsquared(y=df2$logY, yhat=predict(base_mod), p=base_mod$rank)
+  
+  base_dose_mod <- lm(logY ~ logX*dose_score, data=df2)
+  base_dose_r_sq <- adj_rsquared(y=df2$logY, yhat=predict(base_dose_mod), p=base_dose_mod$rank)
+  
+  #Calculate PVE
+  pve <- 100*(base_r_sq/base_dose_r_sq)
+  pve <- ifelse(pve < 0, 0, ifelse(pve > 100, 100, pve))
+  return(pve)
+  
+}
+
+
+boot.pve_base_dose_adj_r_sq_lm_rsq <- function(df, i) {
+  #Select bootstrap sample with replacement
+  df2 <- df[i, ]
+  #Get PVE for bootstrap sample
+  
+  base_mod <- lm(logY ~ logX, data=df2)
+  base_r_sq <- adj_rsquared(y=df2$logY, yhat=predict(base_mod), p=base_mod$rank)
+  
+  base_dose_mod <- lm(logY ~ logX*dose_score, data=df2)
+  base_dose_r_sq <- adj_rsquared(y=df2$logY, yhat=predict(base_dose_mod), p=base_dose_mod$rank)
+  
+  #Calculate PVE
+  pve <- 100*(base_r_sq/base_dose_r_sq)
+  pve <- ifelse(pve < 0, 0, ifelse(pve > 100, 100, pve))
+  return(c(base_r_sq, base_dose_r_sq))
+  
+}
+
+
+
+boot.pve_base_dose_adj_r_sq_exp <- function(df, i) {
+  #Select bootstrap sample with replacement
+  df2 <- df[i, ]
+  #Get PVE for bootstrap sample
+  
+  base_mod <- glm(logY ~ logX, data=df2, family=gaussian(link="log"))
+  base_r_sq <- adj_rsquared(y=df2$logY, yhat=exp(predict(base_mod)), p=base_mod$rank)
+    
+  base_dose_mod <- glm(logY ~ logX*dose_score, data=df2, family=gaussian(link="log"))
+  base_dose_r_sq <- adj_rsquared(y=df2$logY, yhat=exp(predict(base_dose_mod)), p=base_dose_mod$rank)
+    
+  #Calculate PVE
+  pve <- 100*(base_r_sq/base_dose_r_sq)
+  pve <- ifelse(pve < 0, 0, ifelse(pve > 100, 100, pve))
+  return(pve)
+  
+}
+
+
+#Function to determine PVE and 95% bootstrap confidence interval for continuous outcome
+return_all_pve_base_dose_adj_r_sq <- function(logX, logY, model, dose_score = D_doses$dose_score, R=5000, seed=28414987) {
+  #set.seed(seed)
+  #Create data frame from input variables
+  df <- data.frame(logX=logX, logY=logY, dose_score=dose_score)
+  
+  df <- df[complete.cases(df), ]
+  #df$dose_score <- factor(df$dose_score)
+  
+  #Using full data, fit base and base+dose models, get corresponding R squared
+  
+  if (model == "lm") {
+    base_mod <- lm(logY ~ logX, data=df)
+    base_r_sq <- adj_rsquared(y=df$logY, yhat=predict(base_mod), p=base_mod$rank)
+  
+    base_dose_mod <- lm(logY ~ logX*dose_score, data=df)
+    base_dose_r_sq <- adj_rsquared(y=df$logY, yhat=predict(base_dose_mod), p=base_dose_mod$rank)
+    
+    #Calculate PVE
+    pve <- 100*(base_r_sq/base_dose_r_sq)
+    pve <- ifelse(pve < 0, 0, ifelse(pve > 100, 100, pve))
+  
+    #Get bootstrap samples
+    boot_samp <- boot(df, boot.pve_base_dose_adj_r_sq_lm, R=R)
+    ci <- boot.ci(boot_samp, type = "bca")$bca
+  
+    #Get quantiles of bootstrap sample corresponding to 95% confidence interval
+    lower <- ci[4]
+    upper <- ci[5]
+  
+    lower <- ifelse(lower < 0, 0, ifelse(lower > 100, 100, lower))
+    upper <- ifelse(upper < 0, 0, ifelse(upper > 100, 100, upper))
+  
+    
+    
+  } else if (model == "exp") {
+    
+    base_mod <- glm(logY ~ logX, data=df, family=gaussian(link="log"))
+    base_r_sq <- adj_rsquared(y=df$logY, yhat=exp(predict(base_mod)), p=base_mod$rank)
+    
+    base_dose_mod <- glm(logY ~ logX*dose_score, data=df, family=gaussian(link="log"))
+    base_dose_r_sq <- adj_rsquared(y=df$logY, yhat=exp(predict(base_dose_mod)), p=base_dose_mod$rank)
+    
+    
+    #Calculate PVE
+    pve <- 100*(base_r_sq/base_dose_r_sq)
+    pve <- ifelse(pve < 0, 0, ifelse(pve > 100, 100, pve))
+  
+    #Get bootstrap samples
+    boot_samp <- boot(df, boot.pve_base_dose_adj_r_sq_exp, R=R)
+    ci <- boot.ci(boot_samp, type = "bca")$bca
+  
+    #Get quantiles of bootstrap sample corresponding to 95% confidence interval
+    lower <- ci[4]
+    upper <- ci[5]
+  
+    lower <- ifelse(lower < 0, 0, ifelse(lower > 100, 100, lower))
+    upper <- ifelse(upper < 0, 0, ifelse(upper > 100, 100, upper))
+  
+    
+  }
+  
+  #Make dataframe of results to return
+  boot_return <- data.frame(result = paste0(round(pve, 2), " (", round(lower, 2), ", ", round(upper, 2), ")"), row.names = NULL)
+  return(boot_return)
+}
+
+#Function for bootstrap of PVE for binary outcome
+boot.pve_base_dose_cod <- function(df, i) {
+  #Select bootstrap sample with replcaement
+  df2 <- df[i, ]
+  
+  #Calculate PVE from bootstrap sample
+  base_mod <- glm(binY ~ logX, data=df2, family="binomial")
+  base_cod <- adj_cod(y=df2$binY, yhat=predict(base_mod, type="response"), p=base_mod$rank)
+  
+  base_dose_mod <- glm(binY ~ logX*dose_score, data=df2, family="binomial")
+  base_dose_cod <- adj_cod(y=df2$binY, yhat=predict(base_dose_mod, type="response"), p=base_dose_mod$rank)
+  
+  pve <- 100*(base_cod/base_dose_cod)
+  pve <- ifelse(pve < 0, 0, ifelse(pve > 100, 100, pve))
+  return(pve)
+}
+
+
+
+#Function to determine PVE and 95% bootstrap confidence interval for binary outcome
+return_all_pve_base_dose_cod <- function(logX, binY, dose_score = D_doses$dose_score, R=5000, seed=28414987) {
+  #Get PVE
+  set.seed(seed)
+  #Create data frame from input variables, add in binary variable for above/below limit of detection
+  df <- data.frame(logX=logX, binY=binY, dose_score=dose_score)
+  df <- df[complete.cases(df), ]
+  #df$dose_score <- factor(df$dose_score)
+  #Using full data, fit base and base+dose models, get corresponding CoD
+  base_mod <- glm(binY ~ logX, data=df, family="binomial")
+  base_cod <- adj_cod(y=df$binY, yhat=predict(base_mod, type="response"), p=base_mod$rank)
+  
+  base_dose_mod <- glm(binY ~ logX*dose_score, data=df, family="binomial")
+  base_dose_cod <- adj_cod(y=df$binY, yhat=predict(base_dose_mod, type="response"), p=base_dose_mod$rank)
+  
+  #Calculate PVE
+  pve <- 100*(base_cod/base_dose_cod)
+  pve <- ifelse(pve < 0, 0, ifelse(pve > 100, 100, pve))
+  
+  
+  #Get bootstrap samples
+  boot_samp <- boot(df, boot.pve_base_dose_cod, R=R)
+  ci <- tryCatch(boot.ci(boot_samp, type = "bca")$bca, error=function(e) boot.ci(boot_samp, type = "perc")$perc)
+  
+  #Get quantiles of bootstrap sample corresponding to 95% confidence interval
+  lower <- ci[4]
+  upper <- ci[5]
+  
+  lower <- ifelse(lower < 0, 0, ifelse(lower > 100, 100, lower))
+  upper <- ifelse(upper < 0, 0, ifelse(upper > 100, 100, upper))
+  
+  
+  #Make dataframe of results to return
+  boot_return <- data.frame(result = paste0(round(pve, 2), " (", round(lower, 2), ", ", round(upper, 2), ")"), row.names = NULL)
+  return(boot_return)
+}
+
+
+
+### 6.6
+
+#NOTE: Treating dose score as continuous
+#We may need to adjust the dose score value, and calibrate it to the Beta values from 6.3.1
+#This may need to change
+
+#Function for bootstrap of PVE for continuous outcome
+boot.pve_dose_vacc_adj_r_sq_lm <- function(df, i) {
+  #Select bootstrap sample with replacement
+  df2 <- df[i, ]
+  #Get PVE for bootstrap sample
+  base_dose_mod <- lm(logY ~ logX*dose_score, data=df2)
+  base_dose_r_sq <- adj_rsquared(y=df2$logY, yhat=predict(base_dose_mod), p=base_dose_mod$rank)
+  
+  base_dose_vacc_mod <- lm(logY ~ logX*dose_score*manuf, data=df2)
+  base_dose_vacc_r_sq <- adj_rsquared(y=df2$logY, yhat=predict(base_dose_vacc_mod), p=base_dose_vacc_mod$rank)
+  
+  #Calculate PVE
+  pve <- 100*(base_dose_r_sq/base_dose_vacc_r_sq)
+  pve <- ifelse(pve < 0, 0, ifelse(pve > 100, 100, pve))
+  return(pve)
+  
+}
+
+boot.pve_dose_vacc_adj_r_sq_exp <- function(df, i) {
+  #Select bootstrap sample with replacement
+  df2 <- df[i, ]
+  #Get PVE for bootstrap sample
+  base_dose_mod <- glm(logY ~ logX*dose_score, data=df2, family=gaussian(link="log"))
+  base_dose_r_sq <- adj_rsquared(y=df2$logY, yhat=exp(predict(base_dose_mod)), p=base_dose_mod$rank)
+    
+  base_dose_vacc_mod <- glm(logY ~ logX*dose_score*manuf, data=df2, family=gaussian(link="log"))
+  base_dose_vacc_r_sq <- adj_rsquared(y=df2$logY, yhat=exp(predict(base_dose_vacc_mod)), p=base_dose_vacc_mod$rank)
+    
+  #Calculate PVE
+  pve <- 100*(base_dose_r_sq/base_dose_vacc_r_sq)
+  pve <- ifelse(pve < 0, 0, ifelse(pve > 100, 100, pve))
+  return(pve)
+  
+}
+
+#Function to determine PVE and 95% bootstrap confidence interval for continuous outcome
+return_all_pve_dose_vacc_adj_r_sq <- function(logX, logY, model, dose_score = D_doses$dose_score, manuf=D_doses$manuf, R=5000) {
+ 
+  #Create data frame from input variables
+  df <- data.frame(logX=logX, logY=logY, dose_score=dose_score, manuf=manuf)
+  df <- df[complete.cases(df), ]
+  
+  #df$dose_score <- factor(df$dose_score)
+  
+  
+  if (model == "lm") {
+    
+    base_dose_mod <- lm(logY ~ logX*dose_score, data=df)
+    base_dose_r_sq <- adj_rsquared(y=df$logY, yhat=predict(base_dose_mod), p=base_dose_mod$rank)
+    
+    base_dose_vacc_mod <- lm(logY ~ logX*dose_score*manuf, data=df)
+    base_dose_vacc_r_sq <- adj_rsquared(y=df$logY, yhat=predict(base_dose_vacc_mod), p=base_dose_vacc_mod$rank)
+    
+    #Calculate PVE
+    pve <- 100*(base_dose_r_sq/base_dose_vacc_r_sq)
+    pve <- ifelse(pve < 0, 0, ifelse(pve > 100, 100, pve))
+  
+    #Get bootstrap samples
+    boot_samp <- boot(df, boot.pve_dose_vacc_adj_r_sq_lm, R=R)
+    ci <- boot.ci(boot_samp, type = "bca")$bca
+  
+    #Get quantiles of bootstrap sample corresponding to 95% confidence interval
+    lower <- ci[4]
+    upper <- ci[5]
+    
+    lower <- ifelse(lower < 0, 0, ifelse(lower > 100, 100, lower))
+    upper <- ifelse(upper < 0, 0, ifelse(upper > 100, 100, upper))
+    
+  } else if (model == "exp") {
+    
+    base_dose_mod <- glm(logY ~ logX*dose_score, data=df, family=gaussian(link="log"))
+    base_dose_r_sq <- adj_rsquared(y=df$logY, yhat=exp(predict(base_dose_mod)), p=base_dose_mod$rank)
+    
+    base_dose_vacc_mod <- glm(logY ~ logX*dose_score*manuf, data=df, family=gaussian(link="log"))
+    base_dose_vacc_r_sq <- adj_rsquared(y=df$logY, yhat=exp(predict(base_dose_vacc_mod)), p=base_dose_vacc_mod$rank)
+    
+    
+    #Calculate PVE
+    pve <- 100*(base_dose_r_sq/base_dose_vacc_r_sq)
+    pve <- ifelse(pve < 0, 0, ifelse(pve > 100, 100, pve))
+  
+    #Get bootstrap samples
+    boot_samp <- boot(df, boot.pve_dose_vacc_adj_r_sq_exp, R=R)
+    ci <- boot.ci(boot_samp, type = "bca")$bca
+  
+    #Get quantiles of bootstrap sample corresponding to 95% confidence interval
+    lower <- ci[4]
+    upper <- ci[5]
+  
+    lower <- ifelse(lower < 0, 0, ifelse(lower > 100, 100, lower))
+    upper <- ifelse(upper < 0, 0, ifelse(upper > 100, 100, upper))
+  
+    
+  }
+  
+  #Make dataframe of results to return
+  boot_return <- data.frame(result = paste0(round(pve, 2), " (", round(lower, 2), ", ", round(upper, 2), ")"), row.names = NULL)
+  return(boot_return)
+}
+
+
+
+#Function for bootstrap of PVE for binary outcome
+boot.pve_dose_vacc_cod <- function(df, i) {
+  #Select bootstrap sample with replacement
+  df2 <- df[i, ]
+  
+  #Calculate PVE from bootstrap sample
+  base_dose_mod <- glm(binY ~ logX*dose_score, data=df2, family="binomial")
+  base_dose_cod <- adj_cod(y=df2$binY, yhat=predict(base_dose_mod, type="response"), p=base_dose_mod$rank)
+  
+  base_dose_vacc_mod <- glm(binY ~ logX*dose_score*manuf, data=df2, family="binomial")
+  base_dose_vacc_cod <- adj_cod(y=df2$binY, yhat=predict(base_dose_vacc_mod, type="response"), p=base_dose_vacc_mod$rank)
+  
+  pve <- 100*(base_dose_cod/base_dose_vacc_cod)
+  pve <- ifelse(pve < 0, 0, ifelse(pve > 100, 100, pve))
+  return(pve)
+}
+
+
+
+#Function to determine PVE and 95% bootstrap confidence interval for binary outcome
+return_all_pve_dose_vacc_cod <- function(logX, binY, dose_score = D_doses$dose_score, manuf=D_doses$manuf, R=5000) {
+  
+  #Create data frame from input variables, add in binary variable for above/below limit of detection
+  df <- data.frame(logX=logX, binY=binY, dose_score=dose_score, manuf=manuf)
+  df <- df[complete.cases(df), ]
+  
+  #df$dose_score <- factor(df$dose_score)
+  
+  #Using full data, fit base+dose and base+dose+vacc models, get corresponding CoD
+  base_dose_mod <- glm(binY ~ logX*dose_score, data=df, family="binomial")
+  base_dose_cod <- adj_cod(y=df$binY, yhat=predict(base_dose_mod, type="response"), p=base_dose_mod$rank)
+  
+  base_dose_vacc_mod <- glm(binY ~ logX*dose_score*manuf, data=df, family="binomial")
+  base_dose_vacc_cod <- adj_cod(y=df$binY, yhat=predict(base_dose_vacc_mod, type="response"), p=base_dose_vacc_mod$rank)
+  
+  #Get PVE
+  pve <- 100*(base_dose_cod/base_dose_vacc_cod)
+  pve <- ifelse(pve < 0, 0, ifelse(pve > 100, 100, pve))
+  #Get bootstrap samples
+  boot_samp <- boot(df, boot.pve_dose_vacc_cod, R=R)
+  ci <- tryCatch(boot.ci(boot_samp, type = "bca")$bca, error=function(e) boot.ci(boot_samp, type = "perc")$perc)
+  
+  #Get quantiles of bootstrap sample corresponding to 95% confidence interval
+  lower <- ci[4]
+  upper <- ci[5]
+  
+  lower <- ifelse(lower < 0, 0, ifelse(lower > 100, 100, lower))
+  upper <- ifelse(upper < 0, 0, ifelse(upper > 100, 100, upper))
+  
+  #Make dataframe of results to return
+  boot_return <- data.frame(result = paste0(round(pve, 2), " (", round(lower, 2), ", ", round(upper, 2), ")"), row.names = NULL)
+  return(boot_return)
+}
+
+
+
+
+
+## Additional analysis
+## Compare base to base+dose+vacc
+
+boot.pve_base_vacc_adj_r_sq_lm <- function(df, i) {
+  #Select bootstrap sample with replacement
+  df2 <- df[i, ]
+  #Get PVE for bootstrap sample
+  base_mod <- lm(logY ~ logX, data=df2)
+  base_r_sq <- adj_rsquared(y=df2$logY, yhat=predict(base_mod), p=base_mod$rank)
+  
+  base_dose_vacc_mod <- lm(logY ~ logX*dose_score*manuf, data=df2)
+  base_dose_vacc_r_sq <- adj_rsquared(y=df2$logY, yhat=predict(base_dose_vacc_mod), p=base_dose_vacc_mod$rank)
+  
+  #Calculate PVE
+  pve <- 100*(base_r_sq/base_dose_vacc_r_sq)
+  pve <- ifelse(pve < 0, 0, ifelse(pve > 100, 100, pve))
+  return(pve)
+  
+}
+
+boot.pve_base_vacc_adj_r_sq_exp <- function(df, i) {
+  #Select bootstrap sample with replacement
+  df2 <- df[i, ]
+  #Get PVE for bootstrap sample
+  base_mod <- glm(logY ~ logX, data=df2, family=gaussian(link="log"))
+  base_r_sq <- adj_rsquared(y=df2$logY, yhat=exp(predict(base_mod)), p=base_mod$rank)
+    
+  base_dose_vacc_mod <- glm(logY ~ logX*dose_score*manuf, data=df2, family=gaussian(link="log"))
+  base_dose_vacc_r_sq <- adj_rsquared(y=df2$logY, yhat=exp(predict(base_dose_vacc_mod)), p=base_dose_vacc_mod$rank)
+    
+  #Calculate PVE
+  pve <- 100*(base_r_sq/base_dose_vacc_r_sq)
+  pve <- ifelse(pve < 0, 0, ifelse(pve > 100, 100, pve))
+  return(pve)
+  
+}
+
+#Function to determine PVE and 95% bootstrap confidence interval for continuous outcome
+return_all_pve_base_vacc_adj_r_sq <- function(logX, logY, model, dose_score = D_doses$dose_score, manuf=D_doses$manuf, R=5000) {
+ 
+  #Create data frame from input variables
+  df <- data.frame(logX=logX, logY=logY, dose_score=dose_score, manuf=manuf)
+  df <- df[complete.cases(df), ]
+  
+  #df$dose_score <- factor(df$dose_score)
+  
+  
+  if (model == "lm") {
+    
+    base_mod <- lm(logY ~ logX, data=df)
+    base_r_sq <- adj_rsquared(y=df$logY, yhat=predict(base_mod), p=base_mod$rank)
+    
+    base_dose_vacc_mod <- lm(logY ~ logX*dose_score*manuf, data=df)
+    base_dose_vacc_r_sq <- adj_rsquared(y=df$logY, yhat=predict(base_dose_vacc_mod), p=base_dose_vacc_mod$rank)
+    
+    #Calculate PVE
+    pve <- 100*(base_r_sq/base_dose_vacc_r_sq)
+    pve <- ifelse(pve < 0, 0, ifelse(pve > 100, 100, pve))
+  
+    #Get bootstrap samples
+    boot_samp <- boot(df, boot.pve_base_vacc_adj_r_sq_lm, R=R)
+    ci <- tryCatch(boot.ci(boot_samp, type = "bca")$bca, error=function(e) boot.ci(boot_samp, type = "perc")$perc)
+  
+    #Get quantiles of bootstrap sample corresponding to 95% confidence interval
+    lower <- ci[4]
+    upper <- ci[5]
+    
+    lower <- ifelse(lower < 0, 0, ifelse(lower > 100, 100, lower))
+    upper <- ifelse(upper < 0, 0, ifelse(upper > 100, 100, upper))
+    
+  } else if (model == "exp") {
+    
+    base_mod <- glm(logY ~ logX, data=df, family=gaussian(link="log"))
+    base_r_sq <- adj_rsquared(y=df$logY, yhat=exp(predict(base_mod)), p=base_mod$rank)
+    
+    base_dose_vacc_mod <- glm(logY ~ logX*dose_score*manuf, data=df, family=gaussian(link="log"))
+    base_dose_vacc_r_sq <- adj_rsquared(y=df$logY, yhat=exp(predict(base_dose_vacc_mod)), p=base_dose_vacc_mod$rank)
+    
+    
+    #Calculate PVE
+    pve <- 100*(base_r_sq/base_dose_vacc_r_sq)
+    pve <- ifelse(pve < 0, 0, ifelse(pve > 100, 100, pve))
+  
+    #Get bootstrap samples
+    boot_samp <- boot(df, boot.pve_base_vacc_adj_r_sq_exp, R=R)
+    ci <- tryCatch(boot.ci(boot_samp, type = "bca")$bca, error=function(e) boot.ci(boot_samp, type = "perc")$perc)
+  
+    #Get quantiles of bootstrap sample corresponding to 95% confidence interval
+    lower <- ci[4]
+    upper <- ci[5]
+  
+    lower <- ifelse(lower < 0, 0, ifelse(lower > 100, 100, lower))
+    upper <- ifelse(upper < 0, 0, ifelse(upper > 100, 100, upper))
+  
+    
+  }
+  
+  #Make dataframe of results to return
+  boot_return <- data.frame(result = paste0(round(pve, 2), " (", round(lower, 2), ", ", round(upper, 2), ")"), row.names = NULL)
+  return(boot_return)
+}
+
+
+
+#Function for bootstrap of PVE for binary outcome
+boot.pve_base_vacc_cod <- function(df, i) {
+  #Select bootstrap sample with replacement
+  df2 <- df[i, ]
+  
+  #Calculate PVE from bootstrap sample
+  base_mod <- glm(binY ~ logX, data=df2, family="binomial")
+  base_cod <- adj_cod(y=df2$binY, yhat=predict(base_mod, type="response"), p=base_mod$rank)
+  
+  base_dose_vacc_mod <- glm(binY ~ logX*dose_score*manuf, data=df2, family="binomial")
+  base_dose_vacc_cod <- adj_cod(y=df2$binY, yhat=predict(base_dose_vacc_mod, type="response"), p=base_dose_vacc_mod$rank)
+  
+  pve <- 100*(base_cod/base_dose_vacc_cod)
+  pve <- ifelse(pve < 0, 0, ifelse(pve > 100, 100, pve))
+  return(pve)
+}
+
+
+
+#Function to determine PVE and 95% bootstrap confidence interval for binary outcome
+return_all_pve_base_vacc_cod <- function(logX, binY, dose_score = D_doses$dose_score, manuf=D_doses$manuf, R=5000) {
+  
+  #Create data frame from input variables, add in binary variable for above/below limit of detection
+  df <- data.frame(logX=logX, binY=binY, dose_score=dose_score, manuf=manuf)
+  df <- df[complete.cases(df), ]
+  
+  #df$dose_score <- factor(df$dose_score)
+  
+  #Using full data, fit base+dose and base+dose+vacc models, get corresponding CoD
+  base_mod <- glm(binY ~ logX, data=df, family="binomial")
+  base_cod <- adj_cod(y=df$binY, yhat=predict(base_mod, type="response"), p=base_mod$rank)
+  
+  base_dose_vacc_mod <- glm(binY ~ logX*dose_score*manuf, data=df, family="binomial")
+  base_dose_vacc_cod <- adj_cod(y=df$binY, yhat=predict(base_dose_vacc_mod, type="response"), p=base_dose_vacc_mod$rank)
+  
+  #Get PVE
+  pve <- 100*(base_cod/base_dose_vacc_cod)
+  pve <- ifelse(pve < 0, 0, ifelse(pve > 100, 100, pve))
+  #Get bootstrap samples
+  boot_samp <- boot(df, boot.pve_base_vacc_cod, R=R)
+  ci <- tryCatch(boot.ci(boot_samp, type = "bca")$bca, error=function(e) boot.ci(boot_samp, type = "perc")$perc)
+  
+  #Get quantiles of bootstrap sample corresponding to 95% confidence interval
+  lower <- ci[4]
+  upper <- ci[5]
+  
+  lower <- ifelse(lower < 0, 0, ifelse(lower > 100, 100, lower))
+  upper <- ifelse(upper < 0, 0, ifelse(upper > 100, 100, upper))
+  
+  #Make dataframe of results to return
+  boot_return <- data.frame(result = paste0(round(pve, 2), " (", round(lower, 2), ", ", round(upper, 2), ")"), row.names = NULL)
+  return(boot_return)
+}
+
+
+
+
+
+```
+
+
+```{r, echo = FALSE}
+D <- as.data.frame(readxl::read_xlsx("./data/allDat.xlsx"))
+D$manuf <- factor(D$`Vaccine Candidate`, levels = c("Janssen Single Dose", "Janssen Two Dose", "Moderna", "Novavax", "Sanofi", "Placebo"), labels = c("Janssen", "Janssen", "Moderna", "Novavax", "Sanofi", "Placebo"))
+D$`Challenge Day` <- factor(D$`Challenge Day`)
+```
+
+
+
+```{r, echo = FALSE}
+#Input doses from vaccine manufacturers
+doses <- data.frame(Subgroup = c("1A", "1B", "1C", "1D", "1E", "2A", "2B", "2C", "2D", "2E", "2F", "3A", "3B", "3C", "3D", "3E", "4A", "4B", "4C", "4D", "4E"), dose = c(30, 10, 3, 1, 0.3, 5*10^10, 1.25*10^10, 5*10^9, 2*10^9, 5*10^10, 5*10^9, 5, 1, 0.2, 0.04, 0.008, 15, 7.5, 3.75, 1.88, 0.94), min_dose = c(rep(0.3, 5), rep(2*10^9, 6), rep(0.008, 5), rep(0.94, 5)))
+
+doses$Subgroup <- factor(doses$Subgroup)
+```
+
+```{r, echo = FALSE}
+#Merge actual dose information with data
+D_doses <- merge(D, doses, by = "Subgroup", all.x=T)
+
+#Calculate dose score
+D_doses$dose_score <- log10((10*D_doses$dose)/D_doses$min_dose)
+D_doses$dose_score <- ifelse(D_doses$Subgroup == "5A", yes=0, no=D_doses$dose_score)
+#Calculate second dose score for single dose groups, by dividing original dose in half
+D_doses$dose_score_d1_half <- ifelse(D_doses$Subgroup %in% c("2A", "2B", "2C", "2D"), yes = log10((10*(D_doses$dose/2))/(D_doses$min_dose/2)), no = ifelse(D_doses$Subgroup %in% c("2E", "2F"), yes = log10((10*(D_doses$dose))/(D_doses$min_dose/2)), no = D_doses$dose_score))
+D_doses$dose_score_double <- ifelse(D_doses$Subgroup %in% c("2E", "2F"), yes = log10((10*(D_doses$dose))/min(D_doses[D_doses$Subgroup %in% c("2E", "2F"), ]$dose)), no = ifelse(D_doses$Subgroup %in% c("2A", "2B", "2C", "2D"), yes = NA, D_doses$dose_score))
+
+
+D_doses$dose_unit <- ifelse(D_doses$manuf %in% c("Moderna", "Novavax", "Sanofi"), yes = "ug", no = ifelse(D_doses$manuf == "Janssen", yes = "Viral\nParticles", no = ""))
+
+D_doses$dose_char <- paste0(D_doses$dose, " ", D_doses$dose_unit)
+D_doses$dose_char <- ifelse(D_doses$manuf == "Placebo", "0 ug", D_doses$dose_char)
+
+D_doses$dose_char <- factor(D_doses$dose_char, levels = c("0 ug", "0.008 ug", "0.04 ug", "0.2 ug", "0.3 ug", "0.94 ug", "1 ug", "1.88 ug", "3 ug", "3.75 ug", "5 ug", "7.5 ug", "10 ug", "15 ug", "30 ug", "2e+09 Viral\nParticles", "5e+09 Viral\nParticles", "1.25e+10 Viral\nParticles", "5e+10 Viral\nParticles"))
+
+
+```
+
+```{r, echo = FALSE}
+cont.outcomes.log <- grep("log_VL|AUC", names(D_doses))
+cont.outcomes.reg <- grep("VL Day 2|AUC", names(D_doses))
+bin.outcomes <- grep("bin_", names(D_doses))
+
+immune.markers.log <- grep("log_MN|log_PsVNA|log_MSD", names(D_doses))
+immune.markers.reg <- grep("(?<!log_)MN|(?<!log_)PsVNA|(?<!log_)MSD", names(D_doses), perl=T)
+```
+
+
+
+```{r, echo = FALSE}
+cv_outcomes <- readxl::read_xlsx("C:/Users/matejaam/Desktop/cv_outcomes.xlsx")
+cv_outcomes_bin <- readxl::read_xlsx("C:/Users/matejaam/Desktop/cv_outcomes_bin.xlsx")
+```
+
+```{r, echo = FALSE}
+D_doses$dose_score_binned <- factor(if_else(D_doses$dose_score_d1_half > 1 & D_doses$dose_score_d1_half <= 3, cut(D_doses$dose_score_d1_half, breaks = seq(1, 3, 0.5)), if_else(D_doses$dose_score_d1_half > 3, ">3", factor(D_doses$dose_score_d1_half))), levels = c("0", "1", "(1,1.5]", "(1.5,2]", "(2,2.5]", "(2.5,3]", ">3"))
+
+D_doses$dose_score_binned_large <- factor(if_else(D_doses$dose_score_d1_half > 1 & D_doses$dose_score_d1_half <= 2, "(1, 2]", if_else(D_doses$dose_score_d1_half > 2, ">2", factor(D_doses$dose_score_d1_half))), levels = c("0", "1", "(1, 2]", ">2"))
+```
+
+\setcounter{table}{0}
+\renewcommand{\thetable}{A6.5.\arabic{table}}
+
+# 6.5 Appendix
+
+As an appendix to section 6.5, we repeat the analysis using binned dose scores. The single-dose halved dose scores are binned as follows: 0, 1, (1, 1.5], (1.5, 2], (2, 2.5], (2.5, 3], > 3. This is being done in an attempt to improve the performance of the bootstrap confidence intervals. 
+
+## Numeric viral load
+
+```{r, echo = FALSE, cache=T, warning=F, message=F}
+combs2 <- expand.grid(immune.markers.log, cont.outcomes.log)
+combs2$immune <- names(D_doses)[combs2[ ,1]]
+
+combs2$immune <- gsub("_", " ", combs2$immune)
+combs2$immune <- gsub(".", " ", combs2$immune, fixed=T)
+
+combs2$outcome <- names(D_doses)[combs2[ ,2]]
+combs2$outcome <- gsub("_", " ", combs2$outcome)
+combs2$outcome <- gsub(".", " ", combs2$outcome, fixed=T)
+
+combs2 <- merge(combs2, cv_outcomes, by = c("immune", "outcome"))
+
+outcomes2 <- matrix(NA, ncol=length(immune.markers.log), nrow = length(cont.outcomes.log))
+
+
+for (i in 1:nrow(combs2)) {
+  outcomes2[which(cont.outcomes.log == combs2[i, "Var2"]), which(immune.markers.log == combs2[i, "Var1"])] <- return_all_pve_base_dose_adj_r_sq(logX=D_doses[ ,combs2[i, "Var1"]], logY=D_doses[ ,combs2[i, "Var2"]], dose_score = D_doses$dose_score_binned, model = combs2[i, "best.fit"], R=5000)[1, 1]
+}
+
+outcomes2 <- as.data.frame(outcomes2)
+row.names(outcomes2) <- gsub("_", " ", names(D_doses)[cont.outcomes.log])
+row.names(outcomes2) <- gsub(".", " ", row.names(outcomes2), fixed=T)
+
+names(outcomes2) <- gsub("_", " ", names(D_doses)[immune.markers.log])
+names(outcomes2) <- gsub(".", " ", names(outcomes2), fixed=T)
+```
+
+```{r, echo = FALSE, warning = FALSE, message=FALSE}
+
+kable(outcomes2, row.names = TRUE, caption = "Percent of Variance Explained by Immune Virus-Specific Antibodies - Numeric Viral Load with Binned Dose Score", align = "c", escape = F) %>% kable_styling(latex_options=c(position = "HOLD_position")) %>% column_spec(1, width = "6em") %>% column_spec(c(2:(length(immune.markers.log)+1)), width = "3em")
+```
+
+## Binary Viral Load
+
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=T}
+combs3 <- expand.grid(immune.markers.log, bin.outcomes)
+
+outcomes3 <- matrix(NA, ncol=length(immune.markers.log), nrow = length(bin.outcomes))
+
+
+for (i in 1:nrow(combs3)) {
+  outcomes3[which(bin.outcomes == combs3[i, 2]), which(immune.markers.log == combs3[i, 1])] <- return_all_pve_base_dose_cod(logX=D_doses[ ,combs3[i, 1]], binY=D_doses[ ,combs3[i, 2]], dose_score = D_doses$dose_score_binned, R=5000)[1, 1]
+}
+
+outcomes3 <- as.data.frame(outcomes3)
+row.names(outcomes3) <- gsub("_", " ", names(D_doses)[bin.outcomes])
+row.names(outcomes3) <- gsub(".", " ", row.names(outcomes3), fixed=T)
+
+names(outcomes3) <- gsub("_", " ", names(D_doses)[immune.markers.log]) 
+names(outcomes3) <- gsub(".", " ", names(outcomes3), fixed=T)
+
+```
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE}
+kable(outcomes3, row.names = TRUE, caption = "Percent of Variance Explained by Immune Virus Specific Antibodies - Binary Viral Load with Binned Dose Score", align = "c", escape = F) %>% kable_styling(latex_options=c(position = "HOLD_position")) %>% column_spec(1, width = "6em") %>% column_spec(c(2:(length(immune.markers.log)+1)), width = "3em")
+```
+
+
+\setcounter{table}{0}
+\renewcommand{\thetable}{A6.6.\arabic{table}}
+
+
+# 6.6 Appendix
+
+SAP section 6.6 is also repeated using larger bins of the single dose halved dose scores: 0, 1, (1, 2], >2. This was done to increase the amount of data in each bin, after splitting by vaccine.  
+
+
+## Numeric Viral Load
+
+```{r, echo = FALSE, cache=T, warning=F, message=F}
+outcomes4 <- matrix(NA, ncol=length(immune.markers.log), nrow = length(cont.outcomes.log))
+
+
+for (i in 1:nrow(combs2)) {
+  outcomes4[which(cont.outcomes.log == combs2[i, "Var2"]), which(immune.markers.log == combs2[i, "Var1"])] <- return_all_pve_dose_vacc_adj_r_sq(logX=D_doses[ ,combs2[i, "Var1"]], logY=D_doses[ ,combs2[i, "Var2"]], dose_score = D_doses$dose_score_binned_large, model=combs2[i, "best.fit"], R=5000)[1, 1]
+}
+
+outcomes4 <- as.data.frame(outcomes4)
+row.names(outcomes4) <- gsub("_", " ", names(D_doses)[cont.outcomes.log])
+row.names(outcomes4) <- gsub(".", " ", row.names(outcomes4), fixed=T)
+
+names(outcomes4) <- gsub("_", " ", names(D_doses)[immune.markers.log])
+names(outcomes4) <- gsub(".", " ", names(outcomes4), fixed=T)
+
+kable(outcomes4, row.names = TRUE, caption = "Differential Vaccine Effect - Numeric Viral Load with Binned Dose Score", align = "c", escape = F) %>% kable_styling(latex_options=c(position = "HOLD_position")) %>% column_spec(1, width = "6em") %>% column_spec(c(2:(length(immune.markers.log)+1)), width = "3em")
+```
+
+
+
+## Binary Viral Load
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=T}
+outcomes5 <- matrix(NA, ncol=length(immune.markers.log), nrow = length(bin.outcomes))
+
+
+for (i in 1:nrow(combs3)) {
+  outcomes5[which(bin.outcomes == combs3[i, 2]), which(immune.markers.log == combs3[i, 1])] <- return_all_pve_dose_vacc_cod(logX=D_doses[ ,combs3[i, 1]], binY=D_doses[ ,combs3[i, 2]],dose_score = D_doses$dose_score_binned_large, R=5000)[1, 1]
+}
+
+outcomes5 <- as.data.frame(outcomes5)
+row.names(outcomes5) <- gsub("_", " ", names(D_doses)[bin.outcomes])
+row.names(outcomes5) <- gsub(".", " ", row.names(outcomes5), fixed=T)
+
+names(outcomes5) <- gsub("_", " ", names(D_doses)[immune.markers.log])
+names(outcomes5) <- gsub(".", " ", names(outcomes5), fixed=T)
+
+kable(outcomes5, row.names = TRUE, caption = "Differential Vaccine Effect - Binary Viral Load with Binned Dose Score", align = "c", escape = F) %>% kable_styling(latex_options=c(position = "HOLD_position")) %>% column_spec(1, width = "6em") %>% column_spec(c(2:(length(immune.markers.log)+1)), width = "3em")
+```
+
+
+
+
+
+# Additional Analysis - Base+Dose+Vacc vs. Base
+
+As an additional analysis for the appendix, we compare the base model to the base+dose+vacc model. Details of the base model are explained in the SAP section 6.5. The base+dose+vacc model used here is slightly different than that described in SAP section 6.6. In this model, the single dose halved dose score is used as a numeric value, with a separate effect for each vaccine manufacturer. Linear models for numeric viral load (e.g., Section 6.4.1) or logistic models for binary viral load (more complicated models, regardless of what was selected by the cross-validation procedure in section 6.4.2, are not used) will be employed. The percentage of variance (PVE) is 100 times the adjusted R square value from the base model over the adjusted R squared values from the base+dose+vacc model. Confidence intervals on the PVE are calculated by using bias-adjusted nonparametric bootstrap methods (using 5000 replicates). 
+
+
+## Numeric Viral Load
+
+```{r, echo = FALSE, cache=T, warning=F, message=F}
+outcomes6 <- matrix(NA, ncol=length(immune.markers.log), nrow = length(cont.outcomes.log))
+
+
+for (i in 1:nrow(combs2)) {
+  outcomes6[which(cont.outcomes.log == combs2[i, "Var2"]), which(immune.markers.log == combs2[i, "Var1"])] <- return_all_pve_base_vacc_adj_r_sq(logX=D_doses[ ,combs2[i, "Var1"]], logY=D_doses[ ,combs2[i, "Var2"]], dose_score = D_doses$dose_score_d1_half, model=combs2[i, "best.fit"], R=5000)[1, 1]
+}
+
+outcomes6 <- as.data.frame(outcomes6)
+row.names(outcomes6) <- gsub("_", " ", names(D_doses)[cont.outcomes.log])
+row.names(outcomes6) <- gsub(".", " ", row.names(outcomes6), fixed=T)
+
+names(outcomes6) <- gsub("_", " ", names(D_doses)[immune.markers.log])
+names(outcomes6) <- gsub(".", " ", names(outcomes6), fixed=T)
+
+kable(outcomes6, row.names = TRUE, caption = "Compare Base to Base, Dose, Vacc - Numeric Viral Load with Binned Dose Score", align = "c", escape = F) %>% kable_styling(latex_options=c(position = "HOLD_position")) %>% column_spec(1, width = "6em") %>% column_spec(c(2:(length(immune.markers.log)+1)), width = "3em")
+```
+
+
+
+## Binary Viral Load
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=T}
+outcomes7 <- matrix(NA, ncol=length(immune.markers.log), nrow = length(bin.outcomes))
+
+
+for (i in 1:nrow(combs3)) {
+  outcomes7[which(bin.outcomes == combs3[i, 2]), which(immune.markers.log == combs3[i, 1])] <- return_all_pve_base_vacc_cod(logX=D_doses[ ,combs3[i, 1]], binY=D_doses[ ,combs3[i, 2]],dose_score = D_doses$dose_score_d1_half, R=5000)[1, 1]
+}
+
+outcomes7 <- as.data.frame(outcomes7)
+row.names(outcomes7) <- gsub("_", " ", names(D_doses)[bin.outcomes])
+row.names(outcomes7) <- gsub(".", " ", row.names(outcomes7), fixed=T)
+
+names(outcomes7) <- gsub("_", " ", names(D_doses)[immune.markers.log])
+names(outcomes7) <- gsub(".", " ", names(outcomes7), fixed=T)
+
+kable(outcomes7, row.names = TRUE, caption = "Compare Base to Base, Dose, Vacc - Binary Viral Load with Binned Dose Score", align = "c", escape = F) %>% kable_styling(latex_options=c(position = "HOLD_position")) %>% column_spec(1, width = "6em") %>% column_spec(c(2:(length(immune.markers.log)+1)), width = "3em")
+```
+
+
+
+
