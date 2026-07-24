@@ -21,7 +21,6 @@ library(ggpubr)
 library(saws)
 ```
 
-
 ```{r, echo = FALSE}
 #Functions
 
@@ -252,8 +251,6 @@ mgee_categorical <- function(binY, dose_score, challday, x, subset_ind = FALSE, 
 }
 ```
 
-
-
 ```{r, echo = FALSE}
 D <- as.data.frame(readxl::read_xlsx("./data/allDat.xlsx"))
 D$manuf <- factor(D$`Vaccine Candidate`, levels = c("Janssen Single Dose", "Janssen Two Dose", "Moderna", "Novavax", "Sanofi", "Placebo"), labels = c("Janssen", "Janssen", "Moderna", "Novavax", "Sanofi", "Placebo"))
@@ -286,16 +283,10 @@ D_doses$dose_char <- paste0(D_doses$dose, " ", D_doses$dose_unit)
 D_doses$dose_char <- factor(D_doses$dose_char, levels = c("0.008 ug", "0.04 ug", "0.2 ug", "0.3 ug", "0.94 ug", "1 ug", "1.88 ug", "3 ug", "3.75 ug", "5 ug", "7.5 ug", "10 ug", "15 ug", "30 ug", "2e+09 Viral\nParticles", "5e+09 Viral\nParticles", "1.25e+10 Viral\nParticles", "5e+10 Viral\nParticles", "0 "))
 ```
 
-
-
-
 ```{r, echo = FALSE, eval=F}
 ggplot(D_doses, aes(x=`Vaccine Candidate`, y=dose_score)) + geom_point()+ theme_bw() + labs(y = "Dose Score")
 
 ```
-
-
-
 
 ```{r, echo = FALSE}
 cont.outcomes.log <- grep("log_VL|AUC", names(D_doses))
@@ -306,9 +297,6 @@ immune.markers.log <- grep("log_MN|log_PsVNA|log_MSD", names(D_doses))
 immune.markers.reg <- grep("(?<!log_)MN|(?<!log_)PsVNA|(?<!log_)MSD", names(D_doses), perl=T)
 ```
 
-
-
-
 ```{r, echo = FALSE, fig.width = 10, fig.height=6}
 #Create new manufacturer grouping to separate Janssen two dose and single dose groups
 
@@ -317,15 +305,11 @@ D_doses$manuf2 <- factor(ifelse(D_doses$manuf != "Janssen", yes = D_doses$manuf,
 
 # 6.4 Appendix: Prediction of Post-Challenge Viral Load with Single Virus-Specific Antibody
 
- 
-
 ## Binary Viral Load
 
 We graphically plot the virus-specific antibody for each vaccine product, stratified by animals with a positive signal and animals with a negative signal.
 
 ### Plots
-
-
 
 ```{r, echo=FALSE, fig.width = 10, fig.height=6, warning=FALSE, message=F}
 set.seed(12345)
