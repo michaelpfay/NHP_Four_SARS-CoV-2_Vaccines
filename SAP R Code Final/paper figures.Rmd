@@ -251,8 +251,8 @@ a <- ggplot() +
   geom_line(data=predictions, aes(x=x, y = upr)) +
   geom_line(data=predictions, aes(x=x, y = lwr)) +
   geom_ribbon(data=predictions, aes(ymin=lwr, ymax=upr, x=x), alpha=0.15) +
-  geom_text(data=data.frame(x=4.2, y = 50, label = "atop(`Adj. R`^2 == 0.522)"), aes(x = x, y = y, label=label), parse=T) +
-  geom_text(data=data.frame(x=4, y = 49, label = "Est. = 0.82 (0.79, 0.84), p<0.001"), aes(x = x, y = y, label=label), parse=F)
+  geom_text(data=data.frame(x=4.2, y = 50, label = "atop(`Adj. R`^2 == 0.526)"), aes(x = x, y = y, label=label), parse=T) +
+  geom_text(data=data.frame(x=3.9, y = 49, label = "Est. = 0.82 (0.79, 0.84), p<0.001"), aes(x = x, y = y, label=label), parse=F)
 
 b <- ggplot() +
   geom_point(data = D_doses, aes(x = log_PsVNA_ID80_2_weeks_prior_challenge, y = `AUC Nasal Swab.Subgenomic`), col="grey") +
@@ -262,11 +262,12 @@ b <- ggplot() +
   geom_line(data=predictions2, aes(x=x, y = upr)) +
   geom_line(data=predictions2, aes(x=x, y = lwr)) +
   geom_ribbon(data=predictions2, aes(ymin=lwr, ymax=upr, x=x), alpha=0.15) +
-  geom_text(data=data.frame(x=3.93, y = 53.5, label = "atop(`Adj. R`^2 == 0.472)"), aes(x = x, y = y, label=label), parse=T) +
+  geom_text(data=data.frame(x=3.93, y = 53.5, label = "atop(`Adj. R`^2 == 0.477)"), aes(x = x, y = y, label=label), parse=T) +
   geom_text(data=data.frame(x=3.73, y = 53, label = "Est. = -4.0 (-4.73, -3.26), p<0.001"), aes(x = x, y = y, label=label), parse=F)
 
 ggarrange(a, b)
 
+#ggsave("figure11.tiff",dpi=600, height=4, width=10, units="in")
 #ggsave("S:/BRB/Staff Folders/Allyson Mateja/NHP/figure11.tiff", dpi=600, height=4, width=10, units="in")
 ```
 

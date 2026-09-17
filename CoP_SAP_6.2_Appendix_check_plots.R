@@ -219,7 +219,7 @@ gmr <- function(logX, binY) {
 
 
 ## ----echo = FALSE-------------------------------------------------------------------------------------------------------------------------
-D <- as.data.frame(readxl::read_xlsx("./data/allDat.xlsx"))
+D <- as.data.frame(readxl::read_xlsx("./SAP R Code Final/data/allDat.xlsx"))
 D$manuf <- factor(D$`Vaccine Candidate`, levels = c("Janssen Single Dose", "Janssen Two Dose", "Moderna", "Novavax", "Sanofi", "Placebo"), labels = c("Janssen", "Janssen", "Moderna", "Novavax", "Sanofi", "Placebo"))
 D$`Challenge Day` <- factor(D$`Challenge Day`)
 
@@ -273,7 +273,8 @@ combs <- combn(immune.markers.log, 2)
 outcomes <- matrix(NA, nrow=length(immune.markers.log), ncol = length(immune.markers.log))
 
 for (i in 1:ncol(combs)) {
-  outcomes[which(immune.markers.log == combs[2, i]), which(immune.markers.log == combs[1, i])] <- cor_return(D[ ,combs[1, i]], D[ ,combs[2, i]])[1]
+  outcomes[which(immune.markers.log == combs[2, i]), which(immune.markers.log == combs[1, i])] <- 
+    cor_return(D[ ,combs[1, i]], D[ ,combs[2, i]])[1]
 }
 
 # Male 
@@ -294,7 +295,8 @@ combs.f <- combn(immune.markers.log.f, 2)
 outcomes.f <- matrix(NA, nrow=length(immune.markers.log.f), ncol = length(immune.markers.log.f))
 
 for (i in 1:ncol(combs.f)) {
-  outcomes.f[which(immune.markers.log.f == combs.f[2, i]), which(immune.markers.log.f == combs.f[1, i])] <- cor_return(D.f[ ,combs.f[1, i]], D.f[ ,combs.f[2, i]])[1]
+  outcomes.f[which(immune.markers.log.f == combs.f[2, i]), which(immune.markers.log.f == combs.f[1, i])] <- 
+    cor_return(D.f[ ,combs.f[1, i]], D.f[ ,combs.f[2, i]])[1]
 }
 
 
@@ -312,7 +314,8 @@ combs <- combn(cont.outcomes.log, 2)
 outcomes <- matrix(NA, nrow=length(cont.outcomes.log), ncol = length(cont.outcomes.log))
 
 for (i in 1:ncol(combs)) {
-  outcomes[which(cont.outcomes.log == combs[2, i]), which(cont.outcomes.log == combs[1, i])] <- cor_return(D[ ,combs[1, i]], D[ ,combs[2, i]])[1]
+  outcomes[which(cont.outcomes.log == combs[2, i]), which(cont.outcomes.log == combs[1, i])] <- 
+    cor_return(D[ ,combs[1, i]], D[ ,combs[2, i]])[1]
 }
 
 # Male 
@@ -320,7 +323,8 @@ combs.m <- combn(cont.outcomes.log.m, 2)
 outcomes.m <- matrix(NA, nrow=length(cont.outcomes.log.m), ncol = length(cont.outcomes.log.m))
 
 for (i in 1:ncol(combs.m)) {
-  outcomes.m[which(cont.outcomes.log.m == combs.m[2, i]), which(cont.outcomes.log.m == combs.m[1, i])] <- cor_return(D.m[ ,combs.m[1, i]], D.m[ ,combs.m[2, i]])[1]
+  outcomes.m[which(cont.outcomes.log.m == combs.m[2, i]), which(cont.outcomes.log.m == combs.m[1, i])] <- 
+    cor_return(D.m[ ,combs.m[1, i]], D.m[ ,combs.m[2, i]])[1]
 }
 
 
@@ -333,7 +337,8 @@ combs.f <- combn(cont.outcomes.log.f, 2)
 outcomes.f <- matrix(NA, nrow=length(cont.outcomes.log.f), ncol = length(cont.outcomes.log.f))
 
 for (i in 1:ncol(combs.f)) {
-  outcomes.f[which(cont.outcomes.log.f == combs.f[2, i]), which(cont.outcomes.log.f == combs.f[1, i])] <- cor_return(D.f[ ,combs.f[1, i]], D.f[ ,combs.f[2, i]])[1]
+  outcomes.f[which(cont.outcomes.log.f == combs.f[2, i]), which(cont.outcomes.log.f == combs.f[1, i])] <- 
+    cor_return(D.f[ ,combs.f[1, i]], D.f[ ,combs.f[2, i]])[1]
 }
 
 
@@ -350,7 +355,8 @@ combs <- t(expand.grid(cont.outcomes.log, immune.markers.log))
 outcomes <- matrix(NA, nrow=length(immune.markers.log), ncol = length(cont.outcomes.log))
 
 for (i in 1:ncol(combs)) {
-  outcomes[which(immune.markers.log == combs[2, i]), which(cont.outcomes.log == combs[1, i])] <- cor_return(D[ ,combs[1, i]], D[ ,combs[2, i]])[1]
+  outcomes[which(immune.markers.log == combs[2, i]), which(cont.outcomes.log == combs[1, i])] <- 
+    cor_return(D[ ,combs[1, i]], D[ ,combs[2, i]])[1]
 }
 
 # Male 
@@ -358,7 +364,8 @@ combs.m <- t(expand.grid(cont.outcomes.log.m, immune.markers.log.m))
 outcomes.m <- matrix(NA, nrow=length(immune.markers.log.m), ncol = length(cont.outcomes.log.m))
 
 for (i in 1:ncol(combs.m)) {
-  outcomes.m[which(immune.markers.log.m == combs.m[2, i]), which(cont.outcomes.log.m == combs.m[1, i])] <- cor_return(D.m[ ,combs.m[1, i]], D.m[ ,combs.m[2, i]])[1]
+  outcomes.m[which(immune.markers.log.m == combs.m[2, i]), which(cont.outcomes.log.m == combs.m[1, i])] <- 
+    cor_return(D.m[ ,combs.m[1, i]], D.m[ ,combs.m[2, i]])[1]
 }
 
 
@@ -368,7 +375,8 @@ combs.f <- t(expand.grid(cont.outcomes.log.f, immune.markers.log.f))
 outcomes.f <- matrix(NA, nrow=length(immune.markers.log.f), ncol = length(cont.outcomes.log.f))
 
 for (i in 1:ncol(combs.f)) {
-  outcomes.f[which(immune.markers.log.f == combs.f[2, i]), which(cont.outcomes.log.f == combs.f[1, i])] <- cor_return(D.f[ ,combs.f[1, i]], D.f[ ,combs.f[2, i]])[1]
+  outcomes.f[which(immune.markers.log.f == combs.f[2, i]), which(cont.outcomes.log.f == combs.f[1, i])] <- 
+    cor_return(D.f[ ,combs.f[1, i]], D.f[ ,combs.f[2, i]])[1]
 }
 
 plot(as.vector(outcomes.m),as.vector(outcomes.f), xlab="male",ylab="female",main="Spearman correlations between Immune Markers and  Viral Load Measurements")
