@@ -103,10 +103,10 @@ boot.pve_base_dose_adj_r_sq_exp <- function(df, i) {
   df2 <- df[i, ]
   #Get PVE for bootstrap sample
   
-  base_mod <- glm(logY ~ logX, data=df2, family=gaussian(link="log"))
+  base_mod <- glm(logY ~ logX, data=df2, family=stats::gaussian(link="log"))
   base_r_sq <- adj_rsquared(y=df2$logY, yhat=exp(predict(base_mod)), p=base_mod$rank)
     
-  base_dose_mod <- glm(logY ~ logX*dose_score, data=df2, family=gaussian(link="log"))
+  base_dose_mod <- glm(logY ~ logX*dose_score, data=df2, family=stats::gaussian(link="log"))
   base_dose_r_sq <- adj_rsquared(y=df2$logY, yhat=exp(predict(base_dose_mod)), p=base_dose_mod$rank)
     
   #Calculate PVE
@@ -154,10 +154,10 @@ return_all_pve_base_dose_adj_r_sq <- function(logX, logY, model, dose_score = D_
     
   } else if (model == "exp") {
     
-    base_mod <- glm(logY ~ logX, data=df, family=gaussian(link="log"))
+    base_mod <- glm(logY ~ logX, data=df, family=stats::gaussian(link="log"))
     base_r_sq <- adj_rsquared(y=df$logY, yhat=exp(predict(base_mod)), p=base_mod$rank)
     
-    base_dose_mod <- glm(logY ~ logX*dose_score, data=df, family=gaussian(link="log"))
+    base_dose_mod <- glm(logY ~ logX*dose_score, data=df, family=stats::gaussian(link="log"))
     base_dose_r_sq <- adj_rsquared(y=df$logY, yhat=exp(predict(base_dose_mod)), p=base_dose_mod$rank)
     
     
@@ -270,10 +270,10 @@ boot.pve_dose_vacc_adj_r_sq_exp <- function(df, i) {
   #Select bootstrap sample with replacement
   df2 <- df[i, ]
   #Get PVE for bootstrap sample
-  base_dose_mod <- glm(logY ~ logX*dose_score, data=df2, family=gaussian(link="log"))
+  base_dose_mod <- glm(logY ~ logX*dose_score, data=df2, family=stats::gaussian(link="log"))
   base_dose_r_sq <- adj_rsquared(y=df2$logY, yhat=exp(predict(base_dose_mod)), p=base_dose_mod$rank)
     
-  base_dose_vacc_mod <- glm(logY ~ logX*dose_score*manuf, data=df2, family=gaussian(link="log"))
+  base_dose_vacc_mod <- glm(logY ~ logX*dose_score*manuf, data=df2, family=stats::gaussian(link="log"))
   base_dose_vacc_r_sq <- adj_rsquared(y=df2$logY, yhat=exp(predict(base_dose_vacc_mod)), p=base_dose_vacc_mod$rank)
     
   #Calculate PVE
@@ -318,10 +318,10 @@ return_all_pve_dose_vacc_adj_r_sq <- function(logX, logY, model, dose_score = D_
     
   } else if (model == "exp") {
     
-    base_dose_mod <- glm(logY ~ logX*dose_score, data=df, family=gaussian(link="log"))
+    base_dose_mod <- glm(logY ~ logX*dose_score, data=df, family=stats::gaussian(link="log"))
     base_dose_r_sq <- adj_rsquared(y=df$logY, yhat=exp(predict(base_dose_mod)), p=base_dose_mod$rank)
     
-    base_dose_vacc_mod <- glm(logY ~ logX*dose_score*manuf, data=df, family=gaussian(link="log"))
+    base_dose_vacc_mod <- glm(logY ~ logX*dose_score*manuf, data=df, family=stats::gaussian(link="log"))
     base_dose_vacc_r_sq <- adj_rsquared(y=df$logY, yhat=exp(predict(base_dose_vacc_mod)), p=base_dose_vacc_mod$rank)
     
     
@@ -453,8 +453,11 @@ immune.markers.reg <- grep("(?<!log_)MN|(?<!log_)PsVNA|(?<!log_)MSD", names(D_do
 
 
 ```{r, echo = FALSE}
-cv_outcomes <- readxl::read_xlsx("C:/Users/matejaam/Desktop/cv_outcomes.xlsx")
-cv_outcomes_bin <- readxl::read_xlsx("C:/Users/matejaam/Desktop/cv_outcomes_bin.xlsx")
+#cv_outcomes <- readxl::read_xlsx("C:/Users/matejaam/Desktop/cv_outcomes.xlsx")
+#cv_outcomes_bin <- readxl::read_xlsx("C:/Users/matejaam/Desktop/cv_outcomes_bin.xlsx")
+
+cv_outcomes <- readxl::read_xlsx("./intermediate_outcomes/cv_outcomes.xlsx")
+cv_outcomes_bin <- readxl::read_xlsx("./intermediate_outcomes/cv_outcomes_bin.xlsx")
 ```
 
 
@@ -510,8 +513,25 @@ combs2$outcome <- gsub(".", " ", combs2$outcome, fixed=T)
 combs2 <- merge(combs2, cv_outcomes, by = c("immune", "outcome"))
 
 outcomes2 <- matrix(NA, ncol=length(immune.markers.log), nrow = length(cont.outcomes.log))
+```
+
+There is one pair for which the best fit model is a 4-parameter logistic. Since 
+it is not straightforward to calculate the percent variance explain for that model
+(since it is not clear how to make the fuller model that adjusts for covariates with that model),
+we instead use the second-best model for that pair.
+
+```{r, echo = FALSE, cache=T, warning=F, message=F}
+# if best.fit is not 'lm' or 'exp' replace it with the second.best.fit
+# only occurs with "4pl"
+if (!all(combs2[,"best.fit"] %in% c("lm","exp","4pl"))) stop("rewrite code, there are best models that are not one of 'lm', 'exp' or '4pl' ") 
+pick.4pl<-combs2[,"best.fit"]=="4pl"
+
+combs2[pick.4pl,"best.fit"]<- combs2[pick.4pl,"second.best.fit"]
+```
 
 
+
+```{r, echo = FALSE, cache=T, warning=F, message=F}
 for (i in 1:nrow(combs2)) {
   outcomes2[which(cont.outcomes.log == combs2[i, "Var2"]), which(immune.markers.log == combs2[i, "Var1"])] <- return_all_pve_base_dose_adj_r_sq(logX=D_doses[ ,combs2[i, "Var1"]], logY=D_doses[ ,combs2[i, "Var2"]], dose_score = D_doses$dose_score_d1_half, model = combs2[i, "best.fit"], R=5000)[1, 1]
 }

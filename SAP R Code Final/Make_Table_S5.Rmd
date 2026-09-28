@@ -1,0 +1,60 @@
+---
+output: word_document
+---
+
+```{r setup, include=FALSE}
+# first create the /intermediate_outcomes/cv_outcomes_new.xlsx
+# file by running CoPSAP6.4_Final.Rmd (takes several hours to run)
+knitr::opts_chunk$set(echo = TRUE)
+library(readxl)
+library(forcats)
+library(kableExtra)
+```
+
+## 
+
+```{r, echo=FALSE}
+D <- as.data.frame(readxl::read_xlsx("./intermediate_outcomes/cv_outcomes_new.xlsx"))
+
+#summary(D)
+
+immune<- D$immune
+immune<- gsub("log MN ","MN | ",immune)
+immune<- gsub("log MSD ECL ","MSD ECL | ",immune)
+immune<- gsub("log PsVNA ID50 ","PsVNA ID50 | ",immune)
+immune<- gsub("log PsVNA ID80 ","PsVNA ID80 | ",immune)
+immune<- gsub("2 weeks prior challenge","Day -14",immune)
+immune<- gsub("day challenge","Day 0",immune)
+D$immune<- immune
+
+#levels(factor(D$outcome))
+outcome<-D$outcome
+outcome<- gsub("AUC ","AUC | ",outcome)
+outcome<-gsub("log VL Day2 ","VL Day 2 | ",outcome)
+outcome<-gsub("Nasal Swab ","Nasal | ",outcome)
+outcome<-gsub("NasalSwab ","Nasal | ",outcome)
+outcome<-gsub("OPSwab ","OP | ",outcome)
+outcome<-gsub("OPswab ","OP | ",outcome)
+outcome<-gsub("OP Swab ","OP | ",outcome)
+outcome<-gsub("BAL ","BAL | ",outcome)
+outcome<-gsub("PostChallenge","",outcome)
+#levels(factor(outcome))
+D$outcome<-outcome
+
+best.fit<- D$best.fit
+#levels(factor(best.fit))
+best.fit<- gsub("4pl","4-parameter logistic",best.fit)
+best.fit<-gsub("exp","Exponential",best.fit)
+best.fit<-gsub("lm","Linear",best.fit)
+#levels(factor(best.fit))
+D$best.fit<-best.fit
+```
+
+
+```{r, echo=FALSE}
+knitr::kable(D[,1:4],col.names=c("Immune Marker","Viral Load","Model Selected","Adjusted Rsq")) 
+
+```
+
+
+

@@ -415,14 +415,22 @@ cv.outcomes$outcome <- gsub("_", " ", names(D)[combs[ ,2]])
 cv.outcomes$outcome <- gsub(".", " ", cv.outcomes$outcome, fixed=T)
 
 cv.outcomes$best.fit <- 0
+cv.outcomes$second.best.fit<-0
 for (i in 1:nrow(cv.outcomes)) {
-  cv.outcomes[i, ]$best.fit <- which.max(cv.outcomes[i, c(1:5)])
+  j.best <- which.max(cv.outcomes[i, c(1:5)])
+  cv.outcomes[i, ]$best.fit <- j.best
+  # need second-best fit for CoPSAP6.5_6.6Appendix_Final.Rmd
+  # to calculate the PVE, we use the second-best if the best 
+  # is not "lm" or "exp"
+  cv.outcomes[i, ]$second.best.fit <- which.max(cv.outcomes[i, c(1:5)[-j.best]])
 }
 
 cv.outcomes$best.fit <- factor(cv.outcomes$best.fit, levels = seq(1:5), labels = c("lm", "exp", "seg", "ns5", "4pl"))
 
+cv.outcomes$second.best.fit <- factor(cv.outcomes$second.best.fit, levels = seq(1:5), labels = c("lm", "exp", "seg", "ns5", "4pl"))
+
 #write_xlsx(cv.outcomes[ ,c(6:8)], "C:/Users/matejaam/Desktop/cv_outcomes.xlsx")
-write_xlsx(cv.outcomes[ ,c(6:8)], "./intermediate_outcomes/cv_outcomes.xlsx")
+write_xlsx(cv.outcomes[ ,c(6:9)], "./intermediate_outcomes/cv_outcomes.xlsx")
 ```
 
 ```{r, echo = FALSE, warning=F, message=F}
@@ -443,6 +451,14 @@ for (i in 1:nrow(combs)) {
   } else if (cv.outcomes.new[i, "best.fit"] == "exp") {
     mod <- nls(y ~ I(a*exp(b*x)), data=df, start = list(a = 1, b = 1))
     cv.outcomes.new[i, "rsq"] <- round(rsquared(y=df$y, yhat=predict(mod), p=2, n=nrow(df)), 3)
+  } else if (cv.outcomes.new[i, "best.fit"] == "4pl") {
+    
+    
+    mod<-drm(y~x, fct=L.4(names=c("Slope", "Lower", "Upper","Mid")),
+             data=df, control=drmc(method="BFGS"))
+
+    cv.outcomes.new[i, "rsq"] <- round(rsquared(y=df$y, yhat=predict(mod),
+                                                p=4, n=nrow(df)), 3)
   }
   
   cv.outcomes.new[i, "fig.num"] <- paste0("6.4.", i)
@@ -450,6 +466,9 @@ for (i in 1:nrow(combs)) {
 }
 
 cv.outcomes.new <- cv.outcomes.new %>% arrange(desc(rsq))
+
+
+write_xlsx(cv.outcomes.new, "./intermediate_outcomes/cv_outcomes_new.xlsx")
 
 kable(cv.outcomes.new, row.names = FALSE, caption = "Model Selection Results Using Single Virus-Specific Antibody to Predict Post Challenge Viral Load - Numeric", align = "c", escape = F, col.names = c("Virus-Specific Antibody", "Viral Load", "Model Selected", "Adjusted Rsq", "Figure Number"), longtable=T) %>% kable_styling(latex_options=c(position = "HOLD_position", "repeat_header")) %>% column_spec(c(1:5), width = "8em")
 ```

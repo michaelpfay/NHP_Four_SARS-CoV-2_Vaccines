@@ -103,6 +103,83 @@ ggplot(vl_cor_matrix_long, aes(x=vl1, y=vl2, fill = corr)) + geom_tile(col="blac
 #ggsave("S:/BRB/Staff Folders/Allyson Mateja/NHP/figure7.tiff", width=10, height=10, units = "in", dpi=600)
 ```
 
+
+
+
+```{r}
+Ab_VL_results <- matrix(NA,length(cont.outcomes.log),length(immune.markers.log),
+                        dimnames=list(names(D)[cont.outcomes.log],
+                                      names(D)[immune.markers.log]))
+Ab_VL_results
+
+for (i in 1:length(cont.outcomes.log)) {
+  for (j in 1:length(immune.markers.log)){
+    Ab_VL_results[i,j]<- cor(D[,cont.outcomes.log[i]],
+                             D[,immune.markers.log[j]],
+                             method="spearman",
+                             use="pairwise.complete.obs")
+  }
+}  
+  
+
+#round(Ab_VL_results,2)
+
+Ab_VL_df<-as.data.frame(Ab_VL_results)
+names(Ab_VL_df)<-c("MN|Day -14","MN|Day 0","MSD ECL|Day -14","MSD ECL|Day 0",
+                   "PsVNA ID50|Day -14","PsVNA ID50|Day 0","PsVNA ID80|Day -14","PsVNA ID80|Day 0")
+nAb<- ncol(Ab_VL_df)
+
+
+Ab_VL_long<- Ab_VL_df %>% rownames_to_column("VL") %>% 
+  pivot_longer(cols=c(1+ 1:nAb), values_to="corr",names_to="Ab")
+
+VL_names<-matrix(
+  c("AUC BAL.N1","AUC|BAL|N1",
+    "AUC BAL.Subgenomic", "AUC|BAL|Subgenomic",
+    "log_VL_Day2_PostChallenge_BAL.N1","VL Day 2|BAL|N1",
+    "log_VL_Day2_PostChallenge_BAL.Subgenomic", "VL Day 2|BAL|Subgenomic",
+    "AUC OP Swab.N1",      "AUC|OP|N1",
+    "AUC OP Swab.Subgenomic",      "AUC|OP|Subgenomic", 
+    "log_VL_Day2_PostChallenge_OPswab.N1",      "VL Day 2|OP|N1",
+    "log_VL_Day2_PostChallenge_OPswab.Subgenomic",      "VL Day 2|OP|Subgenomic", 
+    "AUC Nasal Swab.N1",  "AUC|Nasal|N1",
+    "AUC Nasal Swab.Subgenomic", "AUC|Nasal|Subgenomic",
+    "log_VL_Day2_PostChallenge_NasalSwab.N1",  "VL Day 2|Nasal|N1",
+    "log_VL_Day2_PostChallenge_NasalSwab.Subgenomic", "VL Day 2|Nasal|Subgenomic"), 
+  12,2, byrow=TRUE)
+
+VL_names<-VL_names[rev(1:12),]
+
+VL_names
+
+#unique(Ab_VL_long$VL)
+
+
+Ab_VL_long$VL <- factor(Ab_VL_long$VL, 
+                                 levels = VL_names[,1], 
+                                 labels = VL_names[,2])
+
+#unique(Ab_VL_long$VL)
+## ----fig.height=10, fig.width=10------------------------------------------------
+ggplot(Ab_VL_long, aes(x=Ab, y=VL, fill = corr)) + geom_tile(col="black") + theme_bw() +
+  labs(y = "Viral Load", x = "Immune Marker", fill = "Spearman\nCorrelation") +
+  theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5)) +
+  geom_text(aes(label = round(corr, 3)), col="white") +
+  scale_fill_viridis_c(direction = -1)  +
+  scale_y_discrete(labels = function(x) str_wrap(x, width = 25), limits=rev)
+
+
+ggsave("./figure7b.tiff", width=10, height=10, units = "in", dpi=600)
+```
+
+
+
+
+
+
+
+
+
 ```{r, echo = FALSE}
 #Input doses from vaccine manufacturers
 doses <- data.frame(Subgroup = c("1A", "1B", "1C", "1D", "1E", "2A", "2B", "2C", "2D", "2E", "2F", "3A", "3B", "3C", "3D", "3E", "4A", "4B", "4C", "4D", "4E", "5A"), dose = c(30, 10, 3, 1, 0.3, 5*10^10, 1.25*10^10, 5*10^9, 2*10^9, 5*10^10, 5*10^9, 5, 1, 0.2, 0.04, 0.008, 15, 7.5, 3.75, 1.88, 0.94, 0), min_dose = c(rep(0.3, 5), rep(2*10^9, 6), rep(0.008, 5), rep(0.94, 5), NA))
@@ -273,7 +350,9 @@ ggarrange(a, b)
 
 
 ```{r, echo = FALSE}
-cv_outcomes <- readxl::read_xlsx("C:/Users/matejaam/Desktop/NHP/cv_outcomes.xlsx")
+#cv_outcomes <- readxl::read_xlsx("C:/Users/matejaam/Desktop/NHP/cv_outcomes.xlsx")
+
+cv_outcomes_new <- readxl::read_xlsx("./intermediate/cv_outcomes_new.xlsx")
 ```
 
 

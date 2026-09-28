@@ -71,7 +71,8 @@ cor_return_boot <- function(logx, logy, R=5000) {
 }
 
 #Function to get Spearman's correlation and 95% CI
-cor_return <- function(logx, logy) {
+#Function to get Spearman's correlation and 95% CI
+cor_return <- function(logx, logy, output="df") {
   #Get Spearman's correlation
   #Determine ranks for X and Y
   
@@ -84,10 +85,17 @@ cor_return <- function(logx, logy) {
   lower <- out$conf.int[1]
   upper <- out$conf.int[2]
   cor_num <- out$estimate
-  #Return Spearman's cor and lower & upper CI bounds as data frame
-  cor_return <- data.frame(result = paste0(round(cor_num, 2), " (", round(lower, 2), ", ", round(upper, 2), ")"), row.names = NULL)
+  if (output=="est"){
+    cor_return<- cor_num
+  } else if (output=="estCI"){
+    cor_return<-c(estimate=cor_num,lower=lower,upper=upper)
+  } else if (output=="df"){
+    #Return Spearman's cor and lower & upper CI bounds as data frame
+    cor_return <- data.frame(result = paste0(round(cor_num, 2), " (", round(lower, 2), ", ", round(upper, 2), ")"), row.names = NULL)
+  }
   return(cor_return)
 }
+
 
 #This is a function for the pairs plot to remove the middle blank diagonal
 gpairs_lower <- function(g){
@@ -522,6 +530,158 @@ kable(outcomes2.f, row.names = TRUE, caption = "6.2.3f: (Female Only) Spearman C
 ```
 
 \newpage
+
+We plot the correlations from tables 6.2.3m and 6.2.3f to see if there 
+is a pattern. It is important to realize that the correlation data 
+are not independent points. To help visualize this, we plot the 
+points by the type of viral load measurement. Specifically, 
+we plot the points where color denotes location 
+(the nasal viral loads are redish, the BAL are blue-ish, and the 
+OP are yellow) and the shape is the time period of the measurement
+(circles are day 2 after challenge, triangles are the AUC [which is a weighted sum over several time points]).  There are 16 points for each location/time-period set of points, representing the 8 virus-specific antibody measurements using either of the RT-qPCR assays (subgenomic or N1) for viral load measurement. Recall that within any specific location/time-period set, the two types of RT-qPCR assays (subgenomic or N1) are highly correlated (see
+Tables 6.2.2m and 6.2.2f).
+
+
+
+
+
+```{r plot.Corr.by.Sex_function, echo=FALSE}
+
+plot.Corr.by.Sex<-function(Data,TITLE="",LEGEND=FALSE,fixlimits=TRUE){
+
+  Data.m<- subset(Data,Sex=="Male")
+  Data.f<- subset(Data,Sex=="Female")
+  cont.outcomes.log.m <- grep("log_VL|AUC", names(Data.m))
+  cont.outcomes.reg.m <- grep("VL Day 2|AUC", names(Data.m))
+
+  immune.markers.log.m <- grep("log_MN|log_PsVNA|log_MSD", names(Data.m))
+  immune.markers.reg.m <- grep("(?<!log_)MN|(?<!log_)PsVNA|(?<!log_)MSD", names(Data.m), perl=T)
+  
+  cont.outcomes.log.f <- grep("log_VL|AUC", names(Data.f))
+  cont.outcomes.reg.f <- grep("VL Day 2|AUC", names(Data.f))
+
+  immune.markers.log.f <- grep("log_MN|log_PsVNA|log_MSD", names(Data.f))
+  immune.markers.reg.f <- grep("(?<!log_)MN|(?<!log_)PsVNA|(?<!log_)MSD", names(Data.f), perl=T)
+  
+  
+  
+  # Both 
+  combs <- t(expand.grid(cont.outcomes.log, immune.markers.log))
+  outcomes <- matrix(NA, nrow=length(immune.markers.log), ncol = length(cont.outcomes.log))
+  
+  for (i in 1:ncol(combs)) {
+    outcomes[which(immune.markers.log == combs[2, i]), which(cont.outcomes.log == combs[1, i])] <- 
+      cor_return(Data[ ,combs[1, i]], Data[ ,combs[2, i]],output="est")
+  }
+  
+  # Male 
+  combs.m <- t(expand.grid(cont.outcomes.log.m, immune.markers.log.m))
+  outcomes.m <-outcomes.m.lower<-outcomes.m.upper<- matrix(NA, nrow=length(immune.markers.log.m), ncol = length(cont.outcomes.log.m))
+  
+  for (i in 1:ncol(combs.m)) {
+    outcomes.m[which(immune.markers.log.m == combs.m[2, i]), which(cont.outcomes.log.m == combs.m[1, i])] <- 
+      cor_return(Data.m[ ,combs.m[1, i]], Data.m[ ,combs.m[2, i]],output="estCI")[1]
+    outcomes.m.lower[which(immune.markers.log.m == combs.m[2, i]), which(cont.outcomes.log.m == combs.m[1, i])] <- 
+      cor_return(Data.m[ ,combs.m[1, i]], Data.m[ ,combs.m[2, i]],output="estCI")[2]
+    outcomes.m.upper[which(immune.markers.log.m == combs.m[2, i]), which(cont.outcomes.log.m == combs.m[1, i])] <- 
+      cor_return(Data.m[ ,combs.m[1, i]], Data.m[ ,combs.m[2, i]],output="estCI")[3]
+  }
+  
+  
+  
+  # Female 
+  combs.f <- t(expand.grid(cont.outcomes.log.f, immune.markers.log.f))
+  outcomes.f <-outcomes.f.lower<-outcomes.f.upper<- matrix(NA, nrow=length(immune.markers.log.f), ncol = length(cont.outcomes.log.f),
+                                                           dimnames=list(names(D.f)[immune.markers.log.f],
+                                                                         names(D.f)[cont.outcomes.log.f]))
+  
+  for (i in 1:ncol(combs.f)) {
+    outcomes.f[which(immune.markers.log.f == combs.f[2, i]), which(cont.outcomes.log.f == combs.f[1, i])] <- 
+      cor_return(D.f[ ,combs.f[1, i]], D.f[ ,combs.f[2, i]],output="estCI")[1]
+    outcomes.f.lower[which(immune.markers.log.f == combs.f[2, i]), which(cont.outcomes.log.f == combs.f[1, i])] <- 
+      cor_return(D.f[ ,combs.f[1, i]], D.f[ ,combs.f[2, i]],output="estCI")[2]
+    outcomes.f.upper[which(immune.markers.log.f == combs.f[2, i]), which(cont.outcomes.log.f == combs.f[1, i])] <- 
+      cor_return(D.f[ ,combs.f[1, i]], D.f[ ,combs.f[2, i]],output="estCI")[3]
+  }
+  
+  t(outcomes.f)
+  
+  if (fixlimits){
+    XLIM<-c(-0.9,-0.1)
+    YLIM<-c(-0.9,-0.1)
+
+  plot(as.vector(outcomes.m),as.vector(outcomes.f), type="n",xlab="male",ylab="female",
+       xlim=XLIM,ylim=YLIM,
+       main=TITLE)
+  } else {
+    plot(as.vector(outcomes.m),as.vector(outcomes.f), type="n",xlab="male",ylab="female",
+         main=TITLE)
+  }
+  
+  #segments(x0=as.vector(outcomes.m),
+  #         y0=as.vector(outcomes.f.lower),
+  #         x1=as.vector(outcomes.m),
+  #         y1=as.vector(outcomes.f.upper),col=gray(0.95),lwd=2)
+  #segments(x0=as.vector(outcomes.m.lower),
+  #         y0=as.vector(outcomes.f),
+  #         x1=as.vector(outcomes.m.upper),
+  #         y1=as.vector(outcomes.f),col=gray(0.95),lwd=2)
+  #points(as.vector(outcomes.m),as.vector(outcomes.f),pch=16)
+  lines(c(-1,1),c(-1,1),lty=2)
+  # add colored points
+  addPoints<-function(loc,type,color,PCH=16){
+    I<- 1:ncol(Data)
+    pick.outcomes<- I[grepl(loc,names(Data)) & grepl(type,names(Data))]
+    pick.col<- which(cont.outcomes.log %in% pick.outcomes)
+    points(as.vector(outcomes.m[,pick.col]),as.vector(outcomes.f[,pick.col]),pch=PCH,col=color)
+  }
+  
+  
+  LOC<-c("Nasal","Nasal","OP","OP","BAL","BAL")
+  TYPE<-rep(c("VL_Day2","AUC"),3)
+  
+  COLOR<-palette.colors()[c(8,7,3,6,5,4)]
+  COLOR<-palette.colors()[c(8,7,5,5,3,6)]
+  PCH<- rep(c(16,17),3)
+  for (i in 1:length(LOC)){
+    addPoints(LOC[i],TYPE[i],COLOR[i],PCH[i])  
+  }
+  
+  if (LEGEND) legend("topleft",legend=paste0(LOC," | ",TYPE), col=COLOR,pch=PCH)
+  
+  
+  
+}
+
+```
+
+
+```{r corr.by.sex.plot, echo=FALSE, warning=F, message=F,   fig.width=8, fig.height=10}
+par(mfrow=c(1,1),mar=c(5,4,4,4)+0.1)
+plot.Corr.by.Sex(D,LEGEND = TRUE)
+
+```
+
+\newpage 
+
+In order to visualize the variability of that plot, we 
+create 8 bootstrap data sets (sample each animal with replacement so that the
+total sample size is the same) and plot those bootstrap data sets in the same manner as the previous plot. Notice how the location/time-period set of points travel together and are variable (especially the OP|VL_Day2 set).
+
+
+```{r bootstrap.corr.by.sex.plots, echo=FALSE, warning=F, message=F,   fig.width=8, fig.height=10}
+par(mfrow=c(3,3),mar=c(2.1,2.1,3.1,1.1))
+plot.Corr.by.Sex(D,"Original")
+for (i in 1:8){
+  set.seed(i)
+  I<- 1:nrow(D)
+  D.i<- D[sample(I,replace=TRUE),]
+  plot.Corr.by.Sex(D.i,paste0("Bootstrap ",i))
+}
+
+```
+
+
 
 <!--  ### GMR - Binary Viral Load 
 
