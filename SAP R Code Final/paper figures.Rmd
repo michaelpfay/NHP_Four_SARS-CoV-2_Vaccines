@@ -165,7 +165,7 @@ ggplot(Ab_VL_long, aes(x=Ab, y=VL, fill = corr)) + geom_tile(col="black") + them
   labs(y = "Viral Load", x = "Immune Marker", fill = "Spearman\nCorrelation") +
   theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5)) +
   geom_text(aes(label = round(corr, 3)), col="white") +
-  scale_fill_viridis_c(direction = -1)  +
+  scale_fill_viridis_c(option="plasma",direction = 1)  +
   scale_y_discrete(labels = function(x) str_wrap(x, width = 25), limits=rev)
 
 
