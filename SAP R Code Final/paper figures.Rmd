@@ -349,11 +349,6 @@ ggarrange(a, b)
 ```
 
 
-```{r, echo = FALSE}
-#cv_outcomes <- readxl::read_xlsx("C:/Users/matejaam/Desktop/NHP/cv_outcomes.xlsx")
-
-cv_outcomes_new <- readxl::read_xlsx("./intermediate/cv_outcomes_new.xlsx")
-```
 
 
 ```{r}
@@ -469,6 +464,9 @@ return_all_pve_base_vacc_adj_r_sq <- function(logX, logY, model, dose_score = D_
 
 ```
 
+```{r}
+cv_outcomes <- readxl::read_xlsx("./intermediate_outcomes/cv_outcomes.xlsx")
+```
 
 
 ```{r, echo = FALSE, cache=T, warning=F, message=F}
@@ -484,8 +482,27 @@ combs2$outcome <- gsub("_", " ", combs2$outcome)
 combs2$outcome <- gsub(".", " ", combs2$outcome, fixed=T)
 
 combs2 <- merge(combs2, cv_outcomes, by = c("immune", "outcome"))
+```
 
 
+There is one pair for which the best fit model is a 4-parameter logistic. Since 
+it is not straightforward to calculate the percent variance explain for that model
+(since it is not clear how to make the fuller model that adjusts for covariates with that model),
+we instead use the second-best model for that pair.
+
+```{r, echo = FALSE, cache=F, warning=F, message=F}
+# if best.fit is not 'lm' or 'exp' replace it with the second.best.fit
+# only occurs with "4pl"
+if (!all(combs2[,"best.fit"] %in% c("lm","exp","4pl"))) stop("rewrite code, there are best models that are not one of 'lm', 'exp' or '4pl' ") 
+pick.4pl<-combs2[,"best.fit"]=="4pl"
+
+combs2[pick.4pl,"best.fit"]<- combs2[pick.4pl,"second.best.fit"]
+```
+
+
+
+
+```{r, echo = FALSE, cache=T, warning=F, message=F}
 for (i in 1:nrow(combs2)) {
   outcomes6[which(cont.outcomes.log == combs2[i, "Var2"]), which(immune.markers.log == combs2[i, "Var1"])] <- return_all_pve_base_vacc_adj_r_sq(logX=D_doses[ ,combs2[i, "Var1"]], logY=D_doses[ ,combs2[i, "Var2"]], dose_score = D_doses$dose_score_d1_half, model=combs2[i, "best.fit"], R=5000)[1, 1]
 }
@@ -519,6 +536,8 @@ ggplot(pve_long, aes(y=vl, x=Ab, fill = PVE)) + geom_tile(col="black") + theme_b
   scale_x_discrete(labels = function(x) str_wrap(x, width = 25))
 
 #ggsave("S:/BRB/Staff Folders/Allyson Mateja/NHP/figure12.tiff", width=10, height=10, units = "in", dpi=600)
+
+ggsave("./figure12.tiff", width=10, height=10, units = "in", dpi=600)
 ```
 
 

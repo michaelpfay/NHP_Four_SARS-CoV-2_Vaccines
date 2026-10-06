@@ -71,7 +71,6 @@ cor_return_boot <- function(logx, logy, R=5000) {
 }
 
 #Function to get Spearman's correlation and 95% CI
-#Function to get Spearman's correlation and 95% CI
 cor_return <- function(logx, logy, output="df") {
   #Get Spearman's correlation
   #Determine ranks for X and Y
