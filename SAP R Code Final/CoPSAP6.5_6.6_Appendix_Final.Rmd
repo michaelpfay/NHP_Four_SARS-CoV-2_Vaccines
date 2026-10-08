@@ -16,6 +16,7 @@ library(boot)
 library(dplyr)
 library(readxl)
 library(saws)
+set.seed(504021)
 ```
 
 
@@ -648,7 +649,7 @@ As an appendix to section 6.5, we repeat the analysis using binned dose scores. 
 
 ## Numeric viral load
 
-```{r, echo = FALSE, cache=T, warning=F, message=F}
+```{r, echo = FALSE, cache=F, warning=F, message=F}
 combs2 <- expand.grid(immune.markers.log, cont.outcomes.log)
 combs2$immune <- names(D_doses)[combs2[ ,1]]
 
@@ -670,7 +671,7 @@ it is not straightforward to calculate the percent variance explain for that mod
 (since it is not clear how to make the fuller model that adjusts for covariates with that model),
 we instead use the second-best model for that pair.
 
-```{r, echo = FALSE, cache=T, warning=F, message=F}
+```{r, echo = FALSE, cache=F, warning=F, message=F}
 # if best.fit is not 'lm' or 'exp' replace it with the second.best.fit
 # only occurs with "4pl"
 if (!all(combs2[,"best.fit"] %in% c("lm","exp","4pl"))) stop("rewrite code, there are best models that are not one of 'lm', 'exp' or '4pl' ") 
@@ -681,7 +682,7 @@ combs2[pick.4pl,"best.fit"]<- combs2[pick.4pl,"second.best.fit"]
 
 
 
-```{r, echo = FALSE, cache=T, warning=F, message=F}
+```{r, echo = FALSE, cache=F, warning=F, message=F}
 for (i in 1:nrow(combs2)) {
   outcomes2[which(cont.outcomes.log == combs2[i, "Var2"]), which(immune.markers.log == combs2[i, "Var1"])] <- return_all_pve_base_dose_adj_r_sq(logX=D_doses[ ,combs2[i, "Var1"]], logY=D_doses[ ,combs2[i, "Var2"]], dose_score = D_doses$dose_score_binned, model =  combs2[i,"best.fit"], R=5000)[1, 1]
 }
@@ -702,7 +703,7 @@ kable(outcomes2, row.names = TRUE, caption = "Percent of Variance Explained by I
 ## Binary Viral Load
 
 
-```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=T}
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=F}
 combs3 <- expand.grid(immune.markers.log, bin.outcomes)
 
 outcomes3 <- matrix(NA, ncol=length(immune.markers.log), nrow = length(bin.outcomes))
@@ -737,7 +738,7 @@ SAP section 6.6 is also repeated using larger bins of the single dose halved dos
 
 ## Numeric Viral Load
 
-```{r, echo = FALSE, cache=T, warning=F, message=F}
+```{r, echo = FALSE, cache=F, warning=F, message=F}
 outcomes4 <- matrix(NA, ncol=length(immune.markers.log), nrow = length(cont.outcomes.log))
 
 
@@ -759,7 +760,7 @@ kable(outcomes4, row.names = TRUE, caption = "Differential Vaccine Effect - Nume
 
 ## Binary Viral Load
 
-```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=T}
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=F}
 outcomes5 <- matrix(NA, ncol=length(immune.markers.log), nrow = length(bin.outcomes))
 
 
@@ -788,7 +789,7 @@ As an additional analysis for the appendix, we compare the base model to the bas
 
 ## Numeric Viral Load
 
-```{r, echo = FALSE, cache=T, warning=F, message=F}
+```{r, echo = FALSE, cache=F, warning=F, message=F}
 outcomes6 <- matrix(NA, ncol=length(immune.markers.log), nrow = length(cont.outcomes.log))
 
 
@@ -802,7 +803,10 @@ row.names(outcomes6) <- gsub(".", " ", row.names(outcomes6), fixed=T)
 
 names(outcomes6) <- gsub("_", " ", names(D_doses)[immune.markers.log])
 names(outcomes6) <- gsub(".", " ", names(outcomes6), fixed=T)
+```
 
+
+```{r, echo = FALSE, cache=F, warning=F, message=F}
 kable(outcomes6, row.names = TRUE, caption = "Compare Base to Base, Dose, Vacc - Numeric Viral Load with Binned Dose Score", align = "c", escape = F) %>% kable_styling(latex_options=c(position = "HOLD_position")) %>% column_spec(1, width = "6em") %>% column_spec(c(2:(length(immune.markers.log)+1)), width = "3em")
 ```
 
@@ -810,7 +814,7 @@ kable(outcomes6, row.names = TRUE, caption = "Compare Base to Base, Dose, Vacc -
 
 ## Binary Viral Load
 
-```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=T}
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=F}
 outcomes7 <- matrix(NA, ncol=length(immune.markers.log), nrow = length(bin.outcomes))
 
 

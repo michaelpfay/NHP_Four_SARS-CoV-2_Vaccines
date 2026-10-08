@@ -19,6 +19,7 @@ library(splines)
 library(segmented)
 library(drc)
 library(investr)
+set.seed(40211)
 ```
 
 ```{r, echo = FALSE}
@@ -34,8 +35,11 @@ D$`Challenge Day` <- factor(D$`Challenge Day`)
 
 
 ```{r, echo = FALSE}
-cv_outcomes <- readxl::read_xlsx("C:/Users/matejaam/Desktop/cv_outcomes.xlsx")
-cv_outcomes_bin <- readxl::read_xlsx("C:/Users/matejaam/Desktop/cv_outcomes_bin.xlsx")
+#cv_outcomes <- readxl::read_xlsx("C:/Users/matejaam/Desktop/cv_outcomes.xlsx")
+#cv_outcomes_bin <- readxl::read_xlsx("C:/Users/matejaam/Desktop/cv_outcomes_bin.xlsx")
+
+cv_outcomes <- readxl::read_xlsx("./intermediate_outcomes/cv_outcomes.xlsx")
+cv_outcomes_bin <- readxl::read_xlsx("./intermediate_outcomes/cv_outcomes_bin.xlsx")
 ```
 
 

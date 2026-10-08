@@ -16,6 +16,9 @@ library(boot)
 library(dplyr)
 library(readxl)
 library(saws)
+# in case no seed was ever set, set one 
+# for reproducibility
+set.seed(3021)
 ```
 
 
@@ -499,7 +502,7 @@ where n is the sample size, and p is the number of parameters (including the int
 Confidence intervals on the PVE are calculated by using bias-adjusted nonparametric bootstrap methods (using 5000 replicates) as in Fay et al., (2012).
 
 
-```{r, echo = FALSE, cache=T, warning=F, message=F}
+```{r, echo = FALSE, cache=F, warning=F, message=F}
 combs2 <- expand.grid(immune.markers.log, cont.outcomes.log)
 combs2$immune <- names(D_doses)[combs2[ ,1]]
 
@@ -520,7 +523,7 @@ it is not straightforward to calculate the percent variance explain for that mod
 (since it is not clear how to make the fuller model that adjusts for covariates with that model),
 we instead use the second-best model for that pair.
 
-```{r, echo = FALSE, cache=T, warning=F, message=F}
+```{r, echo = FALSE, cache=F, warning=F, message=F}
 # if best.fit is not 'lm' or 'exp' replace it with the second.best.fit
 # only occurs with "4pl"
 if (!all(combs2[,"best.fit"] %in% c("lm","exp","4pl"))) stop("rewrite code, there are best models that are not one of 'lm', 'exp' or '4pl' ") 
@@ -531,7 +534,7 @@ combs2[pick.4pl,"best.fit"]<- combs2[pick.4pl,"second.best.fit"]
 
 
 
-```{r, echo = FALSE, cache=T, warning=F, message=F}
+```{r, echo = FALSE, cache=F, warning=F, message=F}
 for (i in 1:nrow(combs2)) {
   outcomes2[which(cont.outcomes.log == combs2[i, "Var2"]), which(immune.markers.log == combs2[i, "Var1"])] <- return_all_pve_base_dose_adj_r_sq(logX=D_doses[ ,combs2[i, "Var1"]], logY=D_doses[ ,combs2[i, "Var2"]], dose_score = D_doses$dose_score_d1_half, model = combs2[i, "best.fit"], R=5000)[1, 1]
 }
@@ -558,7 +561,7 @@ For binary viral load there is a slight variation of the method. Logistic regres
 
 Confidence intervals on the PVE are calculated by using bias-adjusted nonparametric bootstrap methods, if possible, as in Fay et al., (2012). If bias-adjusted bootstrap confidence intervals were not able to be calculated, then percentile confidence intervals were used. 
 
-```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=T}
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=F}
 combs3 <- expand.grid(immune.markers.log, bin.outcomes)
 
 outcomes3 <- matrix(NA, ncol=length(immune.markers.log), nrow = length(bin.outcomes))
@@ -595,7 +598,7 @@ One way of examining differential vaccine effects is to create two models to pre
 
 ## Numeric viral load
 
-```{r, echo = FALSE, cache=T, warning=F, message=F}
+```{r, echo = FALSE, cache=F, warning=F, message=F}
 outcomes4 <- matrix(NA, ncol=length(immune.markers.log), nrow = length(cont.outcomes.log))
 
 
@@ -616,7 +619,7 @@ kable(outcomes4, row.names = TRUE, caption = "Differential Vaccine Effect - Nume
 
 ## Binary viral load
 
-```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=T}
+```{r, echo = FALSE, warning=FALSE, message=FALSE, cache=F}
 outcomes5 <- matrix(NA, ncol=length(immune.markers.log), nrow = length(bin.outcomes))
 
 
